@@ -58,4 +58,12 @@ public class Pessoa {
     // Referência ao usuário dono da conta
     @NotBlank
     private String usuarioId;
+
+    public Pessoa(String nome, String curso, LocalDate dataNasc, String periodo, String email) {
+        this.nome = nome;
+        this.curso = curso;
+        this.dataNasc = dataNasc;
+        this.periodo = periodo;
+        this.email = email;
+    }
 }

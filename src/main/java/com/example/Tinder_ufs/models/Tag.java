@@ -16,4 +16,11 @@ public class Tag {
     @NotBlank
     private String categoria;
     private boolean ativa = true;
+
+    public Tag(String nome, String descricao, String categoria, boolean ativa) {
+        this.nome = nome;
+        this.descricao = descricao;
+        this.categoria = categoria;
+        this.ativa = ativa;
+    }
 }

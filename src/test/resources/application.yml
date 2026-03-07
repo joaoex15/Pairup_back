@@ -1,0 +1,8 @@
+
+spring:
+  application:
+    name: Tinder_ufs
+  data:
+  mongodb:
+    url: mongodb://localhost:27017
+    database: TINDER_teste

@@ -8,6 +8,8 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @AllArgsConstructor
@@ -16,20 +18,39 @@ public class LikeService {
     private final LikeRepository likeRepository;
     private final MatchRepository matchRepository;
 
-    public void darLike(String origemId, String destinoId){
+    // ✅ LISTAR LIKES DADOS (ORIGEM)
+    public List<Like> listarLikesDados(String pessoaId) {
+        return likeRepository.findAll().stream()
+                .filter(like -> like.getPessoaOrigemId().equals(pessoaId))
+                .collect(Collectors.toList());
+    }
 
-        if(origemId.equals(destinoId)){
-            throw new RuntimeException("Não pode dar like em si mesmo");
-        }
+    // ✅ LISTAR LIKES RECEBIDOS (DESTINO)
+    public List<Like> listarLikesRecebidos(String pessoaId) {
+        return likeRepository.findAll().stream()
+                .filter(like -> like.getPessoaDestinoId().equals(pessoaId))
+                .collect(Collectors.toList());
+    }
 
-        // 🔎 Verifica se já existe like
-        Optional<Like> likeExistente =
-                likeRepository.findByPessoaOrigemIdAndPessoaDestinoId(origemId, destinoId);
+    // ✅ VERIFICAR SE JÁ DEU LIKE
+    private boolean jaDeuLike(String origemId, String destinoId) {
+        return listarLikesDados(origemId).stream()
+                .anyMatch(like -> like.getPessoaDestinoId().equals(destinoId) && like.isAtivo());
+    }
 
-        if(likeExistente.isPresent()){
-            if(likeExistente.get().isAtivo()){
-                throw new RuntimeException("Você já curtiu essa pessoa");
-            } else {
+    // ✅ VERIFICAR SE RECEBEU LIKE (like reverso)
+    private boolean recebeuLike(String origemId, String destinoId) {
+        return listarLikesRecebidos(origemId).stream()
+                .anyMatch(like -> like.getPessoaOrigemId().equals(destinoId) && like.isAtivo());
+    }
+
+    // ✅ CRIAR OU ATIVAR LIKE
+    private void criarOuAtivarLike(String origemId, String destinoId) {
+        Optional<Like> likeExistente = likeRepository
+                .findByPessoaOrigemIdAndPessoaDestinoId(origemId, destinoId);
+
+        if (likeExistente.isPresent()) {
+            if (!likeExistente.get().isAtivo()) {
                 likeExistente.get().setAtivo(true);
                 likeRepository.save(likeExistente.get());
             }
@@ -38,28 +59,41 @@ public class LikeService {
             novoLike.setPessoaOrigemId(origemId);
             novoLike.setPessoaDestinoId(destinoId);
             novoLike.setAtivo(true);
-
             likeRepository.save(novoLike);
         }
+    }
 
-        // 🔎 Verifica like reverso
-        Optional<Like> likeReverso =
-                likeRepository.findByPessoaOrigemIdAndPessoaDestinoId(destinoId, origemId);
+    // ✅ CRIAR MATCH SE NÃO EXISTIR
+    private void criarMatchSeNaoExistir(String pessoa1, String pessoa2) {
+        Optional<Match> matchExistente = matchRepository
+                .findByPessoaId1AndPessoaId2(pessoa1, pessoa2);
 
-        if(likeReverso.isPresent() && likeReverso.get().isAtivo()) {
+        if (matchExistente.isEmpty()) {
+            Match match = new Match();
+            match.setPessoaId1(pessoa1);
+            match.setPessoaId2(pessoa2);
+            match.setAtivo(true);
+            matchRepository.save(match);
+            System.out.println("💕 MATCH criado entre " + pessoa1 + " e " + pessoa2);
+        }
+    }
 
-            // 🔎 Verifica se já existe match
-            Optional<Match> matchExistente =
-                    matchRepository.findByPessoaId1AndPessoaId2(origemId, destinoId);
+    // ✅ MÉTODO PRINCIPAL (agora mais limpo!)
+    public void darLike(String origemId, String destinoId) {
+        if (origemId.equals(destinoId)) {
+            throw new RuntimeException("Não pode dar like em si mesmo");
+        }
 
-            if(matchExistente.isEmpty()){
-                Match match = new Match();
-                match.setPessoaId1(origemId);
-                match.setPessoaId2(destinoId);
-                match.setAtivo(true);
+        if (jaDeuLike(origemId, destinoId)) {
+            throw new RuntimeException("Você já curtiu essa pessoa");
+        }
 
-                matchRepository.save(match);
-            }
+        // Cria ou ativa o like
+        criarOuAtivarLike(origemId, destinoId);
+
+        // Verifica se a outra pessoa já deu like (like reverso)
+        if (recebeuLike(origemId, destinoId)) {
+            criarMatchSeNaoExistir(origemId, destinoId);
         }
     }
 }
