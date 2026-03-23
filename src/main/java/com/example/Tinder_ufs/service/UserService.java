@@ -52,4 +52,15 @@ public class UserService {
         userRepository.deleteById((id));
     }
 
+    // NOVO MÉTODO DE LOGIN (apenas isso foi adicionado)
+    public User login(String email, String password) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("Email não encontrado"));
+
+        if (passwordEncoder.matches(password, user.getPassword())) {
+            return user;
+        } else {
+            throw new RuntimeException("Senha incorreta");
+        }
+    }
 }

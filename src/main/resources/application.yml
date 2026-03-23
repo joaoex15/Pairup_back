@@ -1,8 +1,62 @@
-
 spring:
   application:
     name: Tinder_ufs
+
   data:
-  mongodb:
-    url: mongodb://localhost:27017
-    database: TINDER
+    mongodb:
+      host: localhost
+      port: 27017
+      database: TINDER
+
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+      enabled: true
+
+server:
+  port: 8080
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Google Drive - OAuth 2.0
+#
+# SETUP:
+#   1. Coloque o arquivo "google-drive-credentials.json" em src/main/resources/
+#   2. Na primeira execução, o browser abrirá na porta 8888 pedindo autorização
+#   3. Após autorizar, o token é salvo na pasta "tokens/" e não pede mais
+#
+# folder-id: ID da pasta raiz no Drive onde serão criadas as subpastas por pessoa
+#   - Acesse drive.google.com → abra a pasta raiz → copie o ID da URL
+#   - Exemplo de URL: https://drive.google.com/drive/folders/1gw8D9lBqbps_AQ6cdaf4LaeZdYr4pFmw
+#                                                             ↑ esse é o folder-id
+# ─────────────────────────────────────────────────────────────────────────────
+google:
+  drive:
+    application-name: TinderUFS
+    folder-id: "1gw8D9lBqbps_AQ6cdaf4LaeZdYr4pFmw"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Compressão de imagens (Thumbnailator)
+# ─────────────────────────────────────────────────────────────────────────────
+file:
+  compress:
+    width: 800        # largura máxima em px
+    height: 800       # altura máxima em px
+    quality: 0.7      # qualidade JPEG (0.0 a 1.0)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging
+# ─────────────────────────────────────────────────────────────────────────────
+logging:
+  level:
+    com.example.Tinder_ufs: DEBUG
+    com.google.api: WARN       # reduzido para não poluir o console
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Swagger / OpenAPI
+# ─────────────────────────────────────────────────────────────────────────────
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html

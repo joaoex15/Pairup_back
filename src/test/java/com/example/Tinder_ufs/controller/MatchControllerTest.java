@@ -1,10 +1,11 @@
 package com.example.Tinder_ufs.controller;
 
 import com.example.Tinder_ufs.models.User;
+import com.fasterxml.jackson.databind.ObjectMapper;  // ✅ CORRETO
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;  // ✅ CORRETO
 import org.springframework.boot.test.context.SpringBootTest;
-
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -16,7 +17,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest
-@org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
+@AutoConfigureMockMvc  // ✅ Agora funciona!
 class MatchControllerTest {
 
     DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
@@ -28,7 +29,7 @@ class MatchControllerTest {
     private MockMvc mockMvc;
 
     @Autowired
-    private tools.jackson.databind.ObjectMapper objectMapper;  // OU ISSO
+    private ObjectMapper objectMapper;  // ✅ Funciona!
 
     @Test
     void listarMeusMatches() throws Exception {

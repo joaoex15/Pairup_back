@@ -14,4 +14,7 @@ public interface LikeRepository extends MongoRepository<Like, String> {
     );
 
     List<Like> findByPessoaDestinoId(String pessoaDestinoId);
+
+    // ✅ Adicionado — necessário para listarLikesDados no LikeService
+    List<Like> findByPessoaOrigemId(String pessoaOrigemId);
 }

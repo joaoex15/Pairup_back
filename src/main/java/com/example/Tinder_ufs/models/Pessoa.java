@@ -14,7 +14,6 @@ import org.springframework.data.mongodb.core.mapping.DBRef;
 
 import java.time.LocalDate;
 import java.util.List;
-
 @Document(collection = "pessoa")
 @Data
 public class Pessoa {
@@ -28,10 +27,8 @@ public class Pessoa {
     private String curso;
 
     @Past
-    @JsonFormat(pattern = "dd/MM/yyyy")
+    @JsonFormat(pattern = "yyyy-MM-dd")   // frontend envia nesse formato
     private LocalDate dataNasc;
-
-    private String periodo;
 
     @Email
     @NotBlank
@@ -51,19 +48,19 @@ public class Pessoa {
     private String whatsapp;
     private String telegram;
 
-    // Lista de tags
+    // ✅ Tags: @DBRef correto pois Tag é uma entidade
     @DBRef
     private List<Tag> tags;
 
-    // Referência ao usuário dono da conta
-    @NotBlank
+    // ✅ Apenas o ID do usuário — sem @DBRef, sem @NotBlank
     private String usuarioId;
 
-    public Pessoa(String nome, String curso, LocalDate dataNasc, String periodo, String email) {
+    public Pessoa() {}
+
+    public Pessoa(String nome, String curso, LocalDate dataNasc, String email) {
         this.nome = nome;
         this.curso = curso;
         this.dataNasc = dataNasc;
-        this.periodo = periodo;
         this.email = email;
     }
 }

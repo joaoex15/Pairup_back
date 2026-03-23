@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Teste Upload Imagens</title>
+</head>
+<body>
+<h2>Upload de Imagem de Perfil</h2>
+<form id="uploadForm" enctype="multipart/form-data">
+    <input type="file" name="arquivo" id="arquivo" accept="image/*" required><br><br>
+    <input type="text" name="pessoaId" id="pessoaId" placeholder="ID da Pessoa" required><br><br>
+    <label>
+        <input type="checkbox" name="perfil" id="perfil" value="true"> Imagem de Perfil
+    </label><br><br>
+    <button type="submit">Upload</button>
+</form>
+
+<h2>Upload de Múltiplas Imagens</h2>
+<form id="uploadMultiplasForm" enctype="multipart/form-data">
+    <input type="file" name="arquivos" id="arquivos" multiple accept="image/*" required><br><br>
+    <input type="text" name="pessoaId" id="pessoaIdMultipla" placeholder="ID da Pessoa" required><br><br>
+    <button type="submit">Upload Múltiplo</button>
+</form>
+
+<div id="resultado"></div>
+
+<script>
+    document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const formData = new FormData();
+        formData.append('arquivo', document.getElementById('arquivo').files[0]);
+        formData.append('pessoaId', document.getElementById('pessoaId').value);
+        formData.append('perfil', document.getElementById('perfil').checked);
+
+        try {
+            const response = await fetch('/api/imagens/upload', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+            document.getElementById('resultado').innerHTML =
+                '<pre>Upload realizado com sucesso!<br>' + JSON.stringify(data, null, 2) + '</pre>';
+        } catch (error) {
+            document.getElementById('resultado').innerHTML = '<pre style="color: red">Erro: ' + error + '</pre>';
+        }
+    });
+
+    document.getElementById('uploadMultiplasForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const formData = new FormData();
+        const files = document.getElementById('arquivos').files;
+        for (let i = 0; i < files.length; i++) {
+            formData.append('arquivos', files[i]);
+        }
+        formData.append('pessoaId', document.getElementById('pessoaIdMultipla').value);
+
+        try {
+            const response = await fetch('/api/imagens/upload/multiplas', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+            document.getElementById('resultado').innerHTML =
+                '<pre>Upload múltiplo realizado com sucesso!<br>' + JSON.stringify(data, null, 2) + '</pre>';
+        } catch (error) {
+            document.getElementById('resultado').innerHTML = '<pre style="color: red">Erro: ' + error + '</pre>';
+        }
+    });
+</script>
+</body>
+</html>

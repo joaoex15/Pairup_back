@@ -7,9 +7,8 @@ import com.example.Tinder_ufs.repositories.MatchRepository;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import java.util.Optional;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.Optional;
 
 @Service
 @AllArgsConstructor
@@ -18,41 +17,44 @@ public class LikeService {
     private final LikeRepository likeRepository;
     private final MatchRepository matchRepository;
 
-    // ✅ LISTAR LIKES DADOS (ORIGEM)
+    // ── Consultas públicas ──────────────────────────────────────────────────
+
     public List<Like> listarLikesDados(String pessoaId) {
-        return likeRepository.findAll().stream()
-                .filter(like -> like.getPessoaOrigemId().equals(pessoaId))
-                .collect(Collectors.toList());
+        return likeRepository.findByPessoaOrigemId(pessoaId);
     }
 
-    // ✅ LISTAR LIKES RECEBIDOS (DESTINO)
     public List<Like> listarLikesRecebidos(String pessoaId) {
-        return likeRepository.findAll().stream()
-                .filter(like -> like.getPessoaDestinoId().equals(pessoaId))
-                .collect(Collectors.toList());
+        return likeRepository.findByPessoaDestinoId(pessoaId);
     }
 
-    // ✅ VERIFICAR SE JÁ DEU LIKE
+    // ── Helpers privados ────────────────────────────────────────────────────
+
+    /** Verifica se origemId já deu like ativo em destinoId */
     private boolean jaDeuLike(String origemId, String destinoId) {
-        return listarLikesDados(origemId).stream()
-                .anyMatch(like -> like.getPessoaDestinoId().equals(destinoId) && like.isAtivo());
+        return likeRepository
+                .findByPessoaOrigemIdAndPessoaDestinoId(origemId, destinoId)
+                .map(Like::isAtivo)
+                .orElse(false);
     }
 
-    // ✅ VERIFICAR SE RECEBEU LIKE (like reverso)
-    private boolean recebeuLike(String origemId, String destinoId) {
-        return listarLikesRecebidos(origemId).stream()
-                .anyMatch(like -> like.getPessoaOrigemId().equals(destinoId) && like.isAtivo());
+    /** Verifica se destinoId já deu like ativo em origemId (like reverso) */
+    private boolean existeLikeReverso(String origemId, String destinoId) {
+        return likeRepository
+                .findByPessoaOrigemIdAndPessoaDestinoId(destinoId, origemId)
+                .map(Like::isAtivo)
+                .orElse(false);
     }
 
-    // ✅ CRIAR OU ATIVAR LIKE
+    /** Cria um novo like ou reativa um like inativo já existente */
     private void criarOuAtivarLike(String origemId, String destinoId) {
-        Optional<Like> likeExistente = likeRepository
-                .findByPessoaOrigemIdAndPessoaDestinoId(origemId, destinoId);
+        Optional<Like> likeExistente =
+                likeRepository.findByPessoaOrigemIdAndPessoaDestinoId(origemId, destinoId);
 
         if (likeExistente.isPresent()) {
-            if (!likeExistente.get().isAtivo()) {
-                likeExistente.get().setAtivo(true);
-                likeRepository.save(likeExistente.get());
+            Like like = likeExistente.get();
+            if (!like.isAtivo()) {
+                like.setAtivo(true);
+                likeRepository.save(like);
             }
         } else {
             Like novoLike = new Like();
@@ -63,12 +65,16 @@ public class LikeService {
         }
     }
 
-    // ✅ CRIAR MATCH SE NÃO EXISTIR
+    /**
+     * Cria o match verificando as duas ordens possíveis (pessoa1↔pessoa2)
+     * para evitar duplicatas independente de quem deu o like primeiro.
+     */
     private void criarMatchSeNaoExistir(String pessoa1, String pessoa2) {
-        Optional<Match> matchExistente = matchRepository
-                .findByPessoaId1AndPessoaId2(pessoa1, pessoa2);
+        boolean jaExiste =
+                matchRepository.findByPessoaId1AndPessoaId2(pessoa1, pessoa2).isPresent() ||
+                        matchRepository.findByPessoaId1AndPessoaId2(pessoa2, pessoa1).isPresent();
 
-        if (matchExistente.isEmpty()) {
+        if (!jaExiste) {
             Match match = new Match();
             match.setPessoaId1(pessoa1);
             match.setPessoaId2(pessoa2);
@@ -78,21 +84,19 @@ public class LikeService {
         }
     }
 
-    // ✅ MÉTODO PRINCIPAL (agora mais limpo!)
+    // ── Método principal ────────────────────────────────────────────────────
+
     public void darLike(String origemId, String destinoId) {
-        if (origemId.equals(destinoId)) {
+        if (origemId.equals(destinoId))
             throw new RuntimeException("Não pode dar like em si mesmo");
-        }
 
-        if (jaDeuLike(origemId, destinoId)) {
+        if (jaDeuLike(origemId, destinoId))
             throw new RuntimeException("Você já curtiu essa pessoa");
-        }
 
-        // Cria ou ativa o like
         criarOuAtivarLike(origemId, destinoId);
 
-        // Verifica se a outra pessoa já deu like (like reverso)
-        if (recebeuLike(origemId, destinoId)) {
+        // Se a outra pessoa já havia dado like, é match!
+        if (existeLikeReverso(origemId, destinoId)) {
             criarMatchSeNaoExistir(origemId, destinoId);
         }
     }

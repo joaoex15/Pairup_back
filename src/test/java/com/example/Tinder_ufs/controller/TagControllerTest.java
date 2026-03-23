@@ -1,20 +1,20 @@
 package com.example.Tinder_ufs.controller;
 
 import com.example.Tinder_ufs.models.Tag;
+import com.fasterxml.jackson.databind.ObjectMapper;  // ✅ CORRETO
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;  // ✅ CORRETO
 import org.springframework.boot.test.context.SpringBootTest;
-
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
-import tools.jackson.databind.ObjectMapper;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest
-@org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
+@AutoConfigureMockMvc  // ✅ Agora funciona!
 class TagControllerTest {
 
     Tag TAG1 = new Tag("Esporte", "Tag para esportes", "Lazer", true);
@@ -25,7 +25,7 @@ class TagControllerTest {
     private MockMvc mockMvc;
 
     @Autowired
-    private ObjectMapper objectMapper;
+    private ObjectMapper objectMapper;  // ✅ Funciona!
 
     @Test
     void testTag() throws Exception {
@@ -33,7 +33,6 @@ class TagControllerTest {
         String id2;
         String id3;
 
-        // Criar tags
         MvcResult result1 = mockMvc.perform(post("/tags")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(TAG1)))
@@ -64,15 +63,12 @@ class TagControllerTest {
         Tag tagCriada3 = objectMapper.readValue(responseJson3, Tag.class);
         id3 = tagCriada3.getId();
 
-        // Listar todas
         mockMvc.perform(get("/tags"))
                 .andExpect(status().isOk());
 
-        // Listar apenas ativas
         mockMvc.perform(get("/tags/ativas"))
                 .andExpect(status().isOk());
 
-        // Deletar
         mockMvc.perform(delete("/tags/" + id3))
                 .andExpect(status().isNoContent());
     }

@@ -2,6 +2,7 @@ package com.example.Tinder_ufs.repositories;
 
 import com.example.Tinder_ufs.models.Imagem;
 import com.example.Tinder_ufs.models.Pessoa;
+import org.bson.types.ObjectId;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.data.mongodb.repository.Query;
 
@@ -10,40 +11,35 @@ import java.util.Optional;
 
 public interface ImagemRepository extends MongoRepository<Imagem, String> {
 
-    // Buscar todas as imagens de uma pessoa específica
+    // Busca todas as imagens de uma Pessoa (por objeto)
     List<Imagem> findByPessoa(Pessoa pessoa);
 
-    // Buscar todas as imagens de uma pessoa pelo ID da pessoa
+    // Busca todas as imagens de uma Pessoa pelo ID
+    // Converte String → ObjectId para a query funcionar corretamente no MongoDB
     @Query("{ 'pessoa.$id' : ?0 }")
-    List<Imagem> findByPessoaId(String pessoaId);
+    List<Imagem> findByPessoaId(ObjectId pessoaId);
 
-    // Buscar a imagem de perfil de uma pessoa
+    // Busca a imagem de perfil de uma Pessoa (por objeto)
     Optional<Imagem> findByPessoaAndPerfilTrue(Pessoa pessoa);
 
-    // Buscar a imagem de perfil de uma pessoa pelo ID da pessoa
+    // Busca a imagem de perfil de uma Pessoa pelo ID
     @Query("{ 'pessoa.$id' : ?0, 'perfil' : true }")
-    Optional<Imagem> findPerfilByPessoaId(String pessoaId);
+    Optional<Imagem> findPerfilByPessoaId(ObjectId pessoaId);
 
-    // Buscar todas as imagens que são de perfil
+    // Retorna todas as imagens marcadas como perfil
     List<Imagem> findByPerfilTrue();
 
-    // Buscar todas as imagens que NÃO são de perfil
-    List<Imagem> findByPerfilFalse();
-
-    // Verificar se uma pessoa já tem uma imagem de perfil
+    // Verifica se uma pessoa já possui imagem de perfil (por objeto)
     boolean existsByPessoaAndPerfilTrue(Pessoa pessoa);
 
-    // Verificar se uma pessoa já tem uma imagem de perfil pelo ID da pessoa
+    // Verifica se uma pessoa já possui imagem de perfil (por ID)
     @Query(value = "{ 'pessoa.$id' : ?0, 'perfil' : true }", exists = true)
-    boolean existsPerfilByPessoaId(String pessoaId);
+    boolean existsPerfilByPessoaId(ObjectId pessoaId);
 
-    // Contar quantas imagens uma pessoa tem
+    // Conta quantas imagens uma Pessoa possui
     long countByPessoa(Pessoa pessoa);
 
-    // Deletar todas as imagens de uma pessoa
-    void deleteByPessoa(Pessoa pessoa);
-
-    // Deletar todas as imagens de uma pessoa pelo ID da pessoa
+    // Deleta todas as imagens de uma Pessoa pelo ID
     @Query(delete = true, value = "{ 'pessoa.$id' : ?0 }")
-    void deleteByPessoaId(String pessoaId);
+    void deleteByPessoaId(ObjectId pessoaId);
 }

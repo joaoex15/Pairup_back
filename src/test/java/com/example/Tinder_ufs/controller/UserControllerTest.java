@@ -1,14 +1,14 @@
 package com.example.Tinder_ufs.controller;
 
 import com.example.Tinder_ufs.models.User;
+import com.fasterxml.jackson.databind.ObjectMapper;  // ✅ CORRETO
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;  // ✅ CORRETO
 import org.springframework.boot.test.context.SpringBootTest;
-
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
-import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -17,7 +17,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest
-@org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
+@AutoConfigureMockMvc  // ✅ Agora funciona!
 class UserControllerTest {
 
     DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
@@ -29,14 +29,13 @@ class UserControllerTest {
     private MockMvc mockMvc;
 
     @Autowired
-    private ObjectMapper objectMapper;
+    private ObjectMapper objectMapper;  // ✅ Funciona!
 
     @Test
     void testUser() throws Exception {
         String id1;
         String id2;
 
-        // Criar usuários
         MvcResult result1 = mockMvc.perform(post("/users")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(USER1)))
@@ -57,35 +56,29 @@ class UserControllerTest {
         User userCriado2 = objectMapper.readValue(responseJson2, User.class);
         id2 = userCriado2.getId();
 
-        // Listar todos
         mockMvc.perform(get("/users"))
                 .andExpect(status().isOk());
 
-        // Buscar por ID
         mockMvc.perform(get("/users/" + id1))
                 .andExpect(status().isOk());
 
-        // Atualizar
         userCriado1.setNome("João Atualizado");
         mockMvc.perform(put("/users/" + id1)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(userCriado1)))
                 .andExpect(status().isOk());
 
-        // Deletar
         mockMvc.perform(delete("/users/" + id2))
                 .andExpect(status().isNoContent());
     }
 
     @Test
     void testEmailDuplicado() throws Exception {
-        // Criar primeiro usuário
         mockMvc.perform(post("/users")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(USER1)))
                 .andExpect(status().isOk());
 
-        // Tentar criar outro com mesmo email
         User userDuplicado = new User("João 2", "joao@email.com", LocalDate.parse("01/01/2001", formatter), "123456");
 
         mockMvc.perform(post("/users")

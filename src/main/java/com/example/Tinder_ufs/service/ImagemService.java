@@ -11,16 +11,13 @@ import com.google.api.client.http.ByteArrayContent;
 import com.google.api.services.drive.Drive;
 import com.google.api.services.drive.model.File;
 import com.google.api.services.drive.model.Permission;
+import org.bson.types.ObjectId;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
@@ -28,139 +25,158 @@ import java.util.UUID;
 @Service
 public class ImagemService {
 
-    @Autowired
-    private ImagemRepository imagemRepository;
+    @Autowired private ImagemRepository imagemRepository;
+    @Autowired private PessoaRepository pessoaRepository;
+    @Autowired private Drive googleDriveService;
+    @Autowired private GoogleDriveConfig googleDriveConfig;
+    @Autowired private ImageCompressionUtil imageCompressionUtil;
 
-    @Autowired
-    private PessoaRepository pessoaRepository;
+    // ─────────────────────────────────────────────────────────────────────────
+    // UPLOAD
+    // ─────────────────────────────────────────────────────────────────────────
 
-    @Autowired
-    private Drive googleDriveService;
-
-    @Autowired
-    private GoogleDriveConfig googleDriveConfig;
-
-    @Autowired
-    private ImageCompressionUtil imageCompressionUtil;
-
-    @Value("${file.temp.dir}")
-    private String tempDir;
-
-    /**
-     * Upload de imagem com compressão e salvamento no Google Drive
-     */
     @Transactional
     public ImagemUploadResponseDTO uploadImagem(MultipartFile arquivo, String pessoaId, boolean isPerfil) {
         try {
-            // 1. Buscar pessoa
             Pessoa pessoa = pessoaRepository.findById(pessoaId)
-                    .orElseThrow(() -> new RuntimeException("Pessoa não encontrada"));
+                    .orElseThrow(() -> new RuntimeException("Pessoa não encontrada: " + pessoaId));
 
-            // 2. Validar arquivo
             validarArquivo(arquivo);
 
-            // 3. Comprimir imagem
             byte[] imagemComprimida = imageCompressionUtil.compressImage(arquivo);
 
-            // 4. Se for imagem de perfil, remover perfil antigo
             if (isPerfil) {
                 imagemRepository.findByPessoaAndPerfilTrue(pessoa)
-                        .ifPresent(imagemAntiga -> {
-                            deletarImagemGoogleDrive(imagemAntiga);
-                            imagemRepository.delete(imagemAntiga);
+                        .ifPresent(antiga -> {
+                            deletarImagemGoogleDrive(antiga);
+                            imagemRepository.delete(antiga);
                         });
             }
 
-            // 5. Gerar nome único para o arquivo
             String nomeArquivo = gerarNomeUnico(arquivo.getOriginalFilename());
+            String folderKey = (pessoa.getUsuarioId() != null && !pessoa.getUsuarioId().isBlank())
+                    ? pessoa.getUsuarioId() : pessoaId;
 
-            // 6. Upload para Google Drive
-            String googleDriveFileId = uploadParaGoogleDrive(imagemComprimida, nomeArquivo, arquivo.getContentType());
-
-            // 7. Tornar o arquivo público (opcional)
+            String userFolderId = googleDriveConfig.getOrCreateUserFolder(googleDriveService, folderKey);
+            String googleDriveFileId = uploadParaGoogleDrive(imagemComprimida, nomeArquivo, arquivo.getContentType(), userFolderId);
             tornarArquivoPublico(googleDriveFileId);
 
-            // 8. Obter URL do arquivo
             String googleDriveUrl = "https://drive.google.com/uc?id=" + googleDriveFileId;
 
-            // 9. Salvar no MongoDB
-            Imagem imagem = new Imagem();
-            imagem.setPessoa(pessoa);
-            imagem.setCaminho("google-drive:" + googleDriveFileId); // Salva referência ao Google Drive
-            imagem.setPerfil(isPerfil);
-
+            Imagem imagem = new Imagem(pessoa, "google-drive:" + googleDriveFileId, isPerfil);
             Imagem imagemSalva = imagemRepository.save(imagem);
 
-            // 10. Retornar resposta
             return new ImagemUploadResponseDTO(
-                    imagemSalva.getId(),
-                    googleDriveFileId,
-                    googleDriveUrl,
-                    imagem.getCaminho(),
-                    isPerfil,
-                    (long) imagemComprimida.length,
+                    imagemSalva.getId(), googleDriveFileId, googleDriveUrl,
+                    imagem.getCaminho(), isPerfil, (long) imagemComprimida.length,
                     "Imagem enviada com sucesso!"
             );
-
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException("Erro ao processar imagem: " + e.getMessage(), e);
         }
     }
 
-    /**
-     * Upload de múltiplas imagens
-     */
     @Transactional
     public List<ImagemUploadResponseDTO> uploadMultiplasImagens(List<MultipartFile> arquivos, String pessoaId) {
-        return arquivos.stream()
-                .map(arquivo -> {
-                    try {
-                        return uploadImagem(arquivo, pessoaId, false);
-                    } catch (Exception e) {
-                        throw new RuntimeException("Erro ao processar imagem: " + arquivo.getOriginalFilename(), e);
+        if (arquivos == null || arquivos.isEmpty()) throw new RuntimeException("Nenhum arquivo enviado");
+        return arquivos.stream().map(a -> uploadImagem(a, pessoaId, false)).toList();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // DEFINIR COMO PERFIL  ← novo método
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Transactional
+    public Imagem definirComoPerfil(String imagemId) {
+        // 1. Busca a imagem que vai virar perfil
+        Imagem nova = imagemRepository.findById(imagemId)
+                .orElseThrow(() -> new RuntimeException("Imagem não encontrada: " + imagemId));
+
+        // 2. Remove o status de perfil da imagem atual da pessoa
+        imagemRepository.findByPessoaAndPerfilTrue(nova.getPessoa())
+                .ifPresent(antiga -> {
+                    if (!antiga.getId().equals(imagemId)) {
+                        antiga.setPerfil(false);
+                        imagemRepository.save(antiga);
                     }
-                })
-                .toList();
+                });
+
+        // 3. Define a nova como perfil
+        nova.setPerfil(true);
+        return imagemRepository.save(nova);
     }
 
-    /**
-     * Upload para Google Drive
-     */
-    private String uploadParaGoogleDrive(byte[] imagemBytes, String nomeArquivo, String contentType) throws IOException {
-        File fileMetadata = new File();
-        fileMetadata.setName(nomeArquivo);
+    // ─────────────────────────────────────────────────────────────────────────
+    // CONSULTAS
+    // ─────────────────────────────────────────────────────────────────────────
 
-        // Definir pasta no Google Drive (opcional)
-        if (googleDriveConfig.getFolderId() != null && !googleDriveConfig.getFolderId().isEmpty()) {
-            fileMetadata.setParents(Collections.singletonList(googleDriveConfig.getFolderId()));
+    public Imagem buscarPorId(String id) {
+        return imagemRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Imagem não encontrada: " + id));
+    }
+
+    public List<Imagem> listarPorPessoa(String pessoaId) {
+        return imagemRepository.findByPessoaId(new ObjectId(pessoaId));
+    }
+
+    public Imagem buscarImagemPerfil(String pessoaId) {
+        return imagemRepository.findPerfilByPessoaId(new ObjectId(pessoaId))
+                .orElseThrow(() -> new RuntimeException("Imagem de perfil não encontrada: " + pessoaId));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // DELEÇÃO
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Transactional
+    public void deletarImagem(String id) {
+        Imagem imagem = buscarPorId(id);
+        boolean eraPerfil = imagem.isPerfil();
+        Pessoa pessoa = imagem.getPessoa();
+
+        deletarImagemGoogleDrive(imagem);
+        imagemRepository.delete(imagem);
+
+        // Se era perfil, promove a próxima imagem disponível
+        if (eraPerfil) {
+            List<Imagem> restantes = imagemRepository.findByPessoaId(new ObjectId(pessoa.getId()));
+            if (!restantes.isEmpty()) {
+                restantes.get(0).setPerfil(true);
+                imagemRepository.save(restantes.get(0));
+            }
         }
-
-        ByteArrayContent mediaContent = new ByteArrayContent(contentType, imagemBytes);
-
-        File uploadedFile = googleDriveService.files()
-                .create(fileMetadata, mediaContent)
-                .setFields("id, webViewLink")
-                .execute();
-
-        return uploadedFile.getId();
     }
 
-    /**
-     * Tornar arquivo público (qualquer pessoa com link pode ver)
-     */
+    @Transactional
+    public void deletarTodasPorPessoa(String pessoaId) {
+        List<Imagem> imagens = imagemRepository.findByPessoaId(new ObjectId(pessoaId));
+        imagens.forEach(this::deletarImagemGoogleDrive);
+        imagemRepository.deleteByPessoaId(new ObjectId(pessoaId));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // GOOGLE DRIVE — internos
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private String uploadParaGoogleDrive(byte[] bytes, String nome, String contentType, String parentId) throws IOException {
+        File meta = new File();
+        meta.setName(nome);
+        if (parentId != null && !parentId.isBlank()) {
+            meta.setParents(Collections.singletonList(parentId));
+        } else if (googleDriveConfig.getRootFolderId() != null && !googleDriveConfig.getRootFolderId().isBlank()) {
+            meta.setParents(Collections.singletonList(googleDriveConfig.getRootFolderId()));
+        }
+        ByteArrayContent media = new ByteArrayContent(contentType != null ? contentType : "image/jpeg", bytes);
+        return googleDriveService.files().create(meta, media).setFields("id").execute().getId();
+    }
+
     private void tornarArquivoPublico(String fileId) throws IOException {
-        Permission permission = new Permission()
-                .setType("anyone")
-                .setRole("reader");
-
-        googleDriveService.permissions()
-                .create(fileId, permission)
-                .execute();
+        googleDriveService.permissions().create(fileId,
+                new Permission().setType("anyone").setRole("reader")).execute();
     }
 
-    /**
-     * Deletar imagem do Google Drive
-     */
     private void deletarImagemGoogleDrive(Imagem imagem) {
         try {
             if (imagem.getCaminho() != null && imagem.getCaminho().startsWith("google-drive:")) {
@@ -168,81 +184,28 @@ public class ImagemService {
                 googleDriveService.files().delete(fileId).execute();
             }
         } catch (IOException e) {
-            // Log do erro, mas não impede a deleção do registro
-            e.printStackTrace();
+            System.out.println("[Drive] Falha ao deletar: " + e.getMessage());
         }
     }
 
-    /**
-     * Gerar nome único para o arquivo
-     */
+    // ─────────────────────────────────────────────────────────────────────────
+    // UTILITÁRIOS
+    // ─────────────────────────────────────────────────────────────────────────
+
     private String gerarNomeUnico(String nomeOriginal) {
-        String extensao = "";
-        if (nomeOriginal != null && nomeOriginal.contains(".")) {
-            extensao = nomeOriginal.substring(nomeOriginal.lastIndexOf("."));
-        }
-        return UUID.randomUUID().toString() + extensao;
+        String ext = ".jpg";
+        if (nomeOriginal != null && nomeOriginal.contains("."))
+            ext = nomeOriginal.substring(nomeOriginal.lastIndexOf("."));
+        return UUID.randomUUID() + ext;
     }
 
-    /**
-     * Validar arquivo
-     */
     private void validarArquivo(MultipartFile arquivo) {
-        if (arquivo == null || arquivo.isEmpty()) {
-            throw new RuntimeException("Arquivo vazio");
-        }
-
-        String contentType = arquivo.getContentType();
-        if (contentType == null || !contentType.startsWith("image/")) {
+        if (arquivo == null || arquivo.isEmpty())
+            throw new RuntimeException("Arquivo vazio ou não enviado");
+        String ct = arquivo.getContentType();
+        if (ct == null || !ct.startsWith("image/"))
             throw new RuntimeException("Apenas imagens são permitidas");
-        }
-
-        // Validar tamanho (máx 10MB antes da compressão)
-        if (arquivo.getSize() > 10 * 1024 * 1024) {
-            throw new RuntimeException("Imagem muito grande. Tamanho máximo: 10MB");
-        }
-    }
-
-    /**
-     * Buscar imagem por ID
-     */
-    public Imagem buscarPorId(String id) {
-        return imagemRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Imagem não encontrada"));
-    }
-
-    /**
-     * Listar imagens de uma pessoa
-     */
-    public List<Imagem> listarPorPessoa(String pessoaId) {
-        return imagemRepository.findByPessoaId(pessoaId);
-    }
-
-    /**
-     * Buscar imagem de perfil
-     */
-    public Imagem buscarImagemPerfil(String pessoaId) {
-        return imagemRepository.findPerfilByPessoaId(pessoaId)
-                .orElseThrow(() -> new RuntimeException("Imagem de perfil não encontrada"));
-    }
-
-    /**
-     * Deletar imagem
-     */
-    @Transactional
-    public void deletarImagem(String id) {
-        Imagem imagem = buscarPorId(id);
-        deletarImagemGoogleDrive(imagem);
-        imagemRepository.delete(imagem);
-    }
-
-    /**
-     * Deletar todas as imagens de uma pessoa
-     */
-    @Transactional
-    public void deletarTodasPorPessoa(String pessoaId) {
-        List<Imagem> imagens = imagemRepository.findByPessoaId(pessoaId);
-        imagens.forEach(this::deletarImagemGoogleDrive);
-        imagemRepository.deleteByPessoaId(pessoaId);
+        if (arquivo.getSize() > 10L * 1024 * 1024)
+            throw new RuntimeException("Imagem muito grande. Máx: 10MB");
     }
 }

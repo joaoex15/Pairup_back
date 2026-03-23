@@ -31,3 +31,22 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Google Drive OAuth tokens (NUNCA commitar) ###
+tokens/
+tokens/**
+
+### Credenciais Google (NUNCA commitar) ###
+src/main/resources/google-drive-credentials.json
+
+### Logs ###
+*.log
+logs/
+
+### Variáveis de ambiente ###
+.env
+.env.*
+
+### Sistema operacional ###
+.DS_Store
+Thumbs.db

@@ -11,39 +11,31 @@ import java.io.IOException;
 @Component
 public class ImageCompressionUtil {
 
-    @Value("${file.compress.width}")
+    /** Largura máxima após redimensionamento (padrão: 800px) */
+    @Value("${file.compress.width:800}")
     private int targetWidth;
 
-    @Value("${file.compress.height}")
+    /** Altura máxima após redimensionamento (padrão: 800px) */
+    @Value("${file.compress.height:800}")
     private int targetHeight;
 
-    @Value("${file.compress.quality}")
+    /** Qualidade da compressão JPEG, de 0.0 a 1.0 (padrão: 0.7 = 70%) */
+    @Value("${file.compress.quality:0.7}")
     private double quality;
 
     /**
-     * Comprime a imagem e retorna como array de bytes
+     * Comprime e redimensiona a imagem recebida.
+     * Mantém proporção original (fit dentro de targetWidth x targetHeight).
+     *
+     * @param file arquivo recebido via multipart
+     * @return bytes da imagem comprimida
      */
     public byte[] compressImage(MultipartFile file) throws IOException {
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 
         Thumbnails.of(file.getInputStream())
-                .size(targetWidth, targetHeight)  // Redimensiona se necessário
-                .outputQuality(quality)           // Qualidade da compressão (0.0 - 1.0)
-                .outputFormat(getFormat(file.getOriginalFilename())) // Formato de saída
-                .toOutputStream(outputStream);
-
-        return outputStream.toByteArray();
-    }
-
-    /**
-     * Comprime mantendo a proporção original
-     */
-    public byte[] compressImageMaintainAspectRatio(MultipartFile file) throws IOException {
-        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-
-        Thumbnails.of(file.getInputStream())
-                .scale(1.0)                        // Mantém o tamanho original
-                .outputQuality(quality)             // Aplica compressão
+                .size(targetWidth, targetHeight)
+                .outputQuality(quality)
                 .outputFormat(getFormat(file.getOriginalFilename()))
                 .toOutputStream(outputStream);
 
@@ -51,18 +43,15 @@ public class ImageCompressionUtil {
     }
 
     /**
-     * Extrai o formato do arquivo baseado na extensão
+     * Retorna o formato de saída com base na extensão do arquivo original.
+     * PNG e GIF mantêm seu formato; todo o resto é convertido para JPG.
      */
     private String getFormat(String filename) {
-        if (filename == null) return "jpg";
-
-        String extension = filename.substring(filename.lastIndexOf(".") + 1).toLowerCase();
-
-        // Suporta formatos comuns
-        if (extension.equals("png") || extension.equals("gif") || extension.equals("bmp")) {
-            return extension;
-        }
-
-        return "jpg"; // padrão
+        if (filename == null || !filename.contains(".")) return "jpg";
+        String ext = filename.substring(filename.lastIndexOf(".") + 1).toLowerCase();
+        return switch (ext) {
+            case "png", "gif" -> ext;
+            default -> "jpg";
+        };
     }
 }

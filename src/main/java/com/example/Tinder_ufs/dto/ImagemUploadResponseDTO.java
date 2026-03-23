@@ -8,11 +8,25 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ImagemUploadResponseDTO {
-    private String id;              // ID da imagem no MongoDB
-    private String googleDriveId;    // ID do arquivo no Google Drive
-    private String googleDriveUrl;   // URL pública da imagem
-    private String caminho;          // Caminho salvo no formato "google-drive:fileId"
-    private boolean perfil;          // Se é imagem de perfil
-    private long tamanhoBytes;       // Tamanho após compressão
-    private String mensagem;          // Mensagem de retorno
+
+    /** ID do documento salvo no MongoDB */
+    private String id;
+
+    /** ID do arquivo no Google Drive */
+    private String googleDriveId;
+
+    /** URL pública de acesso direto à imagem */
+    private String googleDriveUrl;
+
+    /** Caminho interno salvo no MongoDB (formato: "google-drive:<fileId>") */
+    private String caminho;
+
+    /** true se for imagem de perfil */
+    private boolean perfil;
+
+    /** Tamanho do arquivo após compressão (em bytes) */
+    private long tamanhoBytes;
+
+    /** Mensagem de retorno */
+    private String mensagem;
 }
