@@ -1,10 +1,10 @@
 package com.example.Tinder_ufs.config;
 
 import com.google.api.client.auth.oauth2.Credential;
-import com.google.api.client.extensions.java6.auth.oauth2.AuthorizationCodeInstalledApp;
-import com.google.api.client.extensions.jetty.auth.oauth2.LocalServerReceiver;
+import com.google.api.client.auth.oauth2.TokenResponse;
 import com.google.api.client.googleapis.auth.oauth2.GoogleAuthorizationCodeFlow;
 import com.google.api.client.googleapis.auth.oauth2.GoogleClientSecrets;
+import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.http.HttpTransport;
 import com.google.api.client.json.JsonFactory;
@@ -22,6 +22,7 @@ import org.springframework.core.io.ClassPathResource;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.StringReader;
 import java.util.Collections;
 import java.util.List;
 
@@ -38,19 +39,60 @@ public class GoogleDriveConfig {
     @Value("${google.drive.folder-id:}")
     private String rootFolderId;
 
-    // Roda ao subir o Spring — confirma se o @Value leu o folder-id corretamente
+    // Variável de ambiente com o JSON das credenciais (usado no Railway/produção)
+    // Ex: GOOGLE_DRIVE_CREDENTIALS_JSON={"web":{"client_id":"...","client_secret":"..."}}
+    @Value("${GOOGLE_DRIVE_CREDENTIALS_JSON:}")
+    private String credentialsJson;
+
+    // Refresh token gerado localmente e salvo como variável de ambiente no Railway
+    // Ex: GOOGLE_DRIVE_REFRESH_TOKEN=1//0g...
+    @Value("${GOOGLE_DRIVE_REFRESH_TOKEN:}")
+    private String refreshToken;
+
     @PostConstruct
     public void init() {
         System.out.println("==============================================");
-        System.out.println("[Drive] application-name : " + applicationName);
-        System.out.println("[Drive] root folder-id   : '" + rootFolderId + "'");
-        System.out.println("[Drive] folder-id vazio? : " + (rootFolderId == null || rootFolderId.isBlank()));
+        System.out.println("[Drive] application-name      : " + applicationName);
+        System.out.println("[Drive] root folder-id        : '" + rootFolderId + "'");
+        System.out.println("[Drive] credentials via env?  : " + !credentialsJson.isBlank());
+        System.out.println("[Drive] refresh token via env?: " + !refreshToken.isBlank());
         System.out.println("==============================================");
     }
 
     @Bean
     public Drive driveService() throws Exception {
         HttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
+
+        // ── Modo Produção (Railway): usa variáveis de ambiente ──────────────
+        if (!credentialsJson.isBlank() && !refreshToken.isBlank()) {
+            System.out.println("[Drive] Usando credenciais via variável de ambiente (produção)");
+
+            GoogleClientSecrets clientSecrets = GoogleClientSecrets.load(
+                    JSON_FACTORY,
+                    new StringReader(credentialsJson)
+            );
+
+            String clientId     = clientSecrets.getDetails().getClientId();
+            String clientSecret = clientSecrets.getDetails().getClientSecret();
+
+            // Cria credencial com refresh token salvo
+            GoogleCredential credential = new GoogleCredential.Builder()
+                    .setTransport(httpTransport)
+                    .setJsonFactory(JSON_FACTORY)
+                    .setClientSecrets(clientId, clientSecret)
+                    .build();
+
+            credential.setRefreshToken(refreshToken);
+            // Força renovação do access token
+            credential.refreshToken();
+
+            return new Drive.Builder(httpTransport, JSON_FACTORY, credential)
+                    .setApplicationName(applicationName)
+                    .build();
+        }
+
+        // ── Modo Local (desenvolvimento): usa arquivo JSON + OAuth interativo ──
+        System.out.println("[Drive] Usando credenciais via arquivo JSON (desenvolvimento)");
 
         GoogleClientSecrets clientSecrets = GoogleClientSecrets.load(
                 JSON_FACTORY,
@@ -65,11 +107,22 @@ public class GoogleDriveConfig {
                 .setAccessType("offline")
                 .build();
 
-        LocalServerReceiver receiver = new LocalServerReceiver.Builder()
-                .setPort(8888)
-                .build();
+        // Verifica se já tem token salvo localmente
+        Credential credential = flow.loadCredential("user");
+        if (credential == null) {
+            // Primeira vez: abre browser para autorizar
+            com.google.api.client.extensions.jetty.auth.oauth2.LocalServerReceiver receiver =
+                    new com.google.api.client.extensions.jetty.auth.oauth2.LocalServerReceiver
+                            .Builder().setPort(8888).build();
+            credential = new com.google.api.client.extensions.java6.auth.oauth2
+                    .AuthorizationCodeInstalledApp(flow, receiver).authorize("user");
 
-        Credential credential = new AuthorizationCodeInstalledApp(flow, receiver).authorize("user");
+            // Imprime o refresh token para você salvar no Railway
+            System.out.println("==============================================");
+            System.out.println("[Drive] REFRESH TOKEN (salve no Railway!):");
+            System.out.println(credential.getRefreshToken());
+            System.out.println("==============================================");
+        }
 
         return new Drive.Builder(httpTransport, JSON_FACTORY, credential)
                 .setApplicationName(applicationName)
@@ -80,10 +133,6 @@ public class GoogleDriveConfig {
         return rootFolderId;
     }
 
-    /**
-     * Busca a subpasta com nome = pessoaId dentro da rootFolder.
-     * Se não existir, cria automaticamente com o nome correto.
-     */
     public String getOrCreateUserFolder(Drive drive, String pessoaId) throws IOException {
 
         System.out.println("[Drive] getOrCreateUserFolder → pessoaId='" + pessoaId
@@ -93,7 +142,6 @@ public class GoogleDriveConfig {
             throw new IllegalArgumentException("pessoaId não pode ser nulo ou vazio");
         }
 
-        // Query: busca pasta com nome exato = pessoaId dentro da rootFolder
         String query = "mimeType = 'application/vnd.google-apps.folder'"
                 + " and trashed = false"
                 + " and name = '" + pessoaId + "'";
@@ -102,8 +150,6 @@ public class GoogleDriveConfig {
             query += " and '" + rootFolderId + "' in parents";
         }
 
-        System.out.println("[Drive] Query: " + query);
-
         List<File> folders = drive.files().list()
                 .setQ(query)
                 .setSpaces("drive")
@@ -111,35 +157,27 @@ public class GoogleDriveConfig {
                 .execute()
                 .getFiles();
 
-        // Pasta já existe → retorna o ID
         if (folders != null && !folders.isEmpty()) {
             String existingId = folders.get(0).getId();
             System.out.println("[Drive] Pasta já existe → ID: " + existingId);
             return existingId;
         }
 
-        // Cria a pasta com nome = pessoaId
         File fileMetadata = new File();
-        fileMetadata.setName(pessoaId);                                      // <-- nome correto
+        fileMetadata.setName(pessoaId);
         fileMetadata.setMimeType("application/vnd.google-apps.folder");
 
         if (rootFolderId != null && !rootFolderId.isBlank()) {
-            fileMetadata.setParents(Collections.singletonList(rootFolderId)); // <-- dentro da pasta raiz
-            System.out.println("[Drive] Criando pasta dentro de: " + rootFolderId);
-        } else {
-            System.out.println("[Drive] AVISO: rootFolderId não configurado — pasta criada na raiz do Drive!");
+            fileMetadata.setParents(Collections.singletonList(rootFolderId));
         }
 
         File pastaCriada = drive.files().create(fileMetadata)
                 .setFields("id, name, parents")
                 .execute();
 
-        System.out.println("[Drive] Pasta criada!"
-                + " | name: '"  + pastaCriada.getName() + "'"
-                + " | id: "     + pastaCriada.getId()
-                + " | parents: " + pastaCriada.getParents());
+        System.out.println("[Drive] Pasta criada! | name: '" + pastaCriada.getName()
+                + "' | id: " + pastaCriada.getId());
 
-        // Torna a pasta pública (leitura)
         try {
             Permission permission = new Permission()
                     .setType("anyone")
