@@ -1,9 +1,12 @@
 spring:
   application:
-    name: Tinder_ufs
+    name: Pairup
 
   data:
     mongodb:
+      # Usa a URI completa do Railway (prioridade)
+      uri: ${MONGODB_URI:}
+      # Fallback para conexão tradicional (local)
       host: ${SPRING_DATA_MONGODB_HOST:localhost}
       port: ${SPRING_DATA_MONGODB_PORT:27017}
       database: ${SPRING_DATA_MONGODB_DATABASE:TINDER}
@@ -14,7 +17,7 @@ spring:
       max-request-size: 10MB
       enabled: true
 
-  # NOVO: Google OAuth2 Login
+  # Google OAuth2 Login (para autenticação de usuários)
   security:
     oauth2:
       client:
@@ -23,14 +26,16 @@ spring:
             client-id: ${GOOGLE_CLIENT_ID}
             client-secret: ${GOOGLE_CLIENT_SECRET}
             scope: openid, profile, email
+            redirect-uri: ${FRONTEND_URL:http://localhost:8080}/login/oauth2/code/google
 
 server:
-  port: 8080
+  port: ${PORT:8080}
 
+# Configuração do Google Drive (para upload de arquivos)
 google:
   drive:
     application-name: TinderUFS
-    folder-id: "1gw8D9lBqbps_AQ6cdaf4LaeZdYr4pFmw"
+    folder-id: ${GOOGLE_DRIVE_FOLDER_ID:1gw8D9lBqbps_AQ6cdaf4LaeZdYr4pFmw}
 
 file:
   compress:
@@ -42,6 +47,7 @@ logging:
   level:
     com.example.Tinder_ufs: DEBUG
     com.google.api: WARN
+    org.mongodb.driver: INFO
 
 springdoc:
   api-docs:
