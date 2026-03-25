@@ -20,7 +20,6 @@ WORKDIR /app
 COPY --from=build /app/target/*.jar app.jar
 
 # NOVO: copia as credenciais do Google Drive
-COPY src/main/resources/google-drive-credentials.json /app/resources/google-drive-credentials.json
 
 EXPOSE 8080
 
