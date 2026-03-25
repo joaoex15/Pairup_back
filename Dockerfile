@@ -12,17 +12,18 @@ COPY src ./src
 RUN mvn clean package -DskipTests -B
 
 # ─── Stage 2: Runtime ──────────────────────────────────────────────────────
+# ─── Stage 2: Runtime ──────────────────────────────────────────────────────
 FROM eclipse-temurin:21-jre-alpine
 
 WORKDIR /app
 
-# Copia o jar gerado
 COPY --from=build /app/target/*.jar app.jar
 
-# Porta da aplicação
+# NOVO: copia as credenciais do Google Drive
+COPY src/main/resources/google-drive-credentials.json /app/resources/google-drive-credentials.json
+
 EXPOSE 8080
 
-# Variáveis de ambiente padrão (podem ser sobrescritas no docker-compose)
 ENV SPRING_DATA_MONGODB_HOST=mongodb
 ENV SPRING_DATA_MONGODB_PORT=27017
 ENV SPRING_DATA_MONGODB_DATABASE=TINDER
