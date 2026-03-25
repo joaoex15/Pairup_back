@@ -1,35 +1,31 @@
 package com.example.Tinder_ufs.controller;
 
 import com.example.Tinder_ufs.models.User;
-import com.fasterxml.jackson.databind.ObjectMapper;  // ✅ CORRETO
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;  // ✅ CORRETO
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
-
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest
-@AutoConfigureMockMvc  // ✅ Agora funciona!
+@AutoConfigureMockMvc
 class UserControllerTest {
 
-    DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
-
-    User USER1 = new User("João", "joao@email.com", LocalDate.parse("01/01/2001", formatter), "123456");
-    User USER2 = new User("Maria", "maria@email.com", LocalDate.parse("02/02/2002", formatter), "123456");
+    // Usando o construtor correto: (nome, email, password)
+    User USER1 = new User("João", "joao@email.com", "123456");
+    User USER2 = new User("Maria", "maria@email.com", "123456");
 
     @Autowired
     private MockMvc mockMvc;
 
     @Autowired
-    private ObjectMapper objectMapper;  // ✅ Funciona!
+    private ObjectMapper objectMapper;
 
     @Test
     void testUser() throws Exception {
@@ -79,7 +75,7 @@ class UserControllerTest {
                         .content(objectMapper.writeValueAsString(USER1)))
                 .andExpect(status().isOk());
 
-        User userDuplicado = new User("João 2", "joao@email.com", LocalDate.parse("01/01/2001", formatter), "123456");
+        User userDuplicado = new User("João 2", "joao@email.com", "123456");
 
         mockMvc.perform(post("/users")
                         .contentType(MediaType.APPLICATION_JSON)

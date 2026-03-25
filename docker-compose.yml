@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+
+  mongodb:
+    image: mongo:7.0
+    container_name: tinder_ufs_mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: TINDER
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - tinder_net
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tinder_ufs_app
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mongodb
+    environment:
+      SPRING_DATA_MONGODB_HOST: mongodb
+      SPRING_DATA_MONGODB_PORT: 27017
+      SPRING_DATA_MONGODB_DATABASE: TINDER
+      # Google OAuth2
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      # Frontend URL para redirect após login Google
+      FRONTEND_URL: https://pairup-flax.vercel.app
+    volumes:
+      - ./tokens:/app/tokens
+      - ./src/main/resources/google-drive-credentials.json:/app/resources/google-drive-credentials.json:ro
+    networks:
+      - tinder_net
+
+volumes:
+  mongo_data:
+
+networks:
+  tinder_net:
+    driver: bridge

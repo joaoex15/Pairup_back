@@ -1,35 +1,31 @@
 package com.example.Tinder_ufs.controller;
 
 import com.example.Tinder_ufs.models.User;
-import com.fasterxml.jackson.databind.ObjectMapper;  // ✅ CORRETO
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;  // ✅ CORRETO
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
-
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest
-@AutoConfigureMockMvc  // ✅ Agora funciona!
+@AutoConfigureMockMvc
 class MatchControllerTest {
 
-    DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
-
-    User USER1 = new User("João", "joao@gmail.com", LocalDate.parse("01/01/2001", formatter), "teste123");
-    User USER2 = new User("Maria", "maria@gmail.com", LocalDate.parse("02/02/2002", formatter), "teste123");
+    // Usando o construtor correto: (nome, email, password)
+    User USER1 = new User("João", "joao@gmail.com", "teste123");
+    User USER2 = new User("Maria", "maria@gmail.com", "teste123");
 
     @Autowired
     private MockMvc mockMvc;
 
     @Autowired
-    private ObjectMapper objectMapper;  // ✅ Funciona!
+    private ObjectMapper objectMapper;
 
     @Test
     void listarMeusMatches() throws Exception {

@@ -11,10 +11,11 @@ public class WebConfig implements WebMvcConfigurer {
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/**")
                 .allowedOrigins(
-                        "http://localhost:5173",     // Svelte dev server
+                        "http://localhost:5173",
                         "http://127.0.0.1:5173",
-                        "http://localhost:3000",     // Outras portas comuns
-                        "http://localhost:8080"       // O próprio backend
+                        "http://localhost:3000",
+                        "http://localhost:8080",
+                        "https://pairup-flax.vercel.app"  // ← NOVO
                 )
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD")
                 .allowedHeaders("*")
