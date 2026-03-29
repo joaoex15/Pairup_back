@@ -8,13 +8,17 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/api/imagens")
@@ -23,6 +27,16 @@ public class ImagemController {
 
     @Autowired
     private ImagemService imagemService;
+
+    // ✅ Tipos MIME aceitos
+    private static final Set<String> ALLOWED_MIME_TYPES = Set.of(
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+    );
+
+    // ✅ Tamanho máximo: 10 MB
+    private static final long MAX_SIZE_BYTES = 10 * 1024 * 1024L;
 
     // ─────────────────────────────────────────────────────────────────────────
     // UPLOAD
@@ -33,12 +47,23 @@ public class ImagemController {
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Upload realizado com sucesso"),
             @ApiResponse(responseCode = "400", description = "Arquivo inválido ou não enviado"),
-            @ApiResponse(responseCode = "404", description = "Pessoa não encontrada")
+            @ApiResponse(responseCode = "404", description = "Pessoa não encontrada"),
+            @ApiResponse(responseCode = "415", description = "Formato de imagem não suportado")
     })
     public ResponseEntity<ImagemUploadResponseDTO> uploadImagem(
             @RequestParam("arquivo") MultipartFile arquivo,
             @RequestParam("pessoaId") String pessoaId,
-            @RequestParam(value = "perfil", defaultValue = "false") boolean perfil) {
+            @RequestParam(value = "perfil", defaultValue = "false") boolean perfil,
+            HttpServletRequest request) {
+
+        // ✅ pessoaId deve ser o próprio usuário autenticado — previne IDOR
+        String authenticatedUserId = (String) request.getAttribute("userId");
+        if (!pessoaId.equals(authenticatedUserId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Você só pode fazer upload de imagens para seu próprio perfil.");
+        }
+
+        validarArquivo(arquivo);
 
         return ResponseEntity.ok(imagemService.uploadImagem(arquivo, pessoaId, perfil));
     }
@@ -47,7 +72,17 @@ public class ImagemController {
     @Operation(summary = "Upload de múltiplas imagens")
     public ResponseEntity<List<ImagemUploadResponseDTO>> uploadMultiplasImagens(
             @RequestParam("arquivos") List<MultipartFile> arquivos,
-            @RequestParam("pessoaId") String pessoaId) {
+            @RequestParam("pessoaId") String pessoaId,
+            HttpServletRequest request) {
+
+        // ✅ Verifica que o usuário autenticado só sobe para si mesmo
+        String authenticatedUserId = (String) request.getAttribute("userId");
+        if (!pessoaId.equals(authenticatedUserId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Você só pode fazer upload de imagens para seu próprio perfil.");
+        }
+
+        arquivos.forEach(this::validarArquivo);
 
         return ResponseEntity.ok(imagemService.uploadMultiplasImagens(arquivos, pessoaId));
     }
@@ -75,7 +110,7 @@ public class ImagemController {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // DEFINIR PERFIL  ← novo endpoint
+    // DEFINIR PERFIL
     // ─────────────────────────────────────────────────────────────────────────
 
     @PatchMapping("/{id}/perfil")
@@ -115,8 +150,39 @@ public class ImagemController {
             @ApiResponse(responseCode = "204", description = "Imagens deletadas com sucesso"),
             @ApiResponse(responseCode = "404", description = "Pessoa não encontrada")
     })
-    public ResponseEntity<Void> deletarTodasPorPessoa(@PathVariable String pessoaId) {
+    public ResponseEntity<Void> deletarTodasPorPessoa(
+            @PathVariable String pessoaId,
+            HttpServletRequest request) {
+
+        // ✅ Só o próprio usuário pode deletar suas imagens
+        String authenticatedUserId = (String) request.getAttribute("userId");
+        if (!pessoaId.equals(authenticatedUserId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Você só pode deletar suas próprias imagens.");
+        }
+
         imagemService.deletarTodasPorPessoa(pessoaId);
         return ResponseEntity.noContent().build();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HELPERS
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void validarArquivo(MultipartFile arquivo) {
+        if (arquivo == null || arquivo.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Arquivo vazio ou não enviado.");
+        }
+
+        String contentType = arquivo.getContentType();
+        if (contentType == null || !ALLOWED_MIME_TYPES.contains(contentType)) {
+            throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                    "Formato não suportado. Use: JPEG, PNG ou WebP.");
+        }
+
+        if (arquivo.getSize() > MAX_SIZE_BYTES) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE,
+                    "Arquivo muito grande. Tamanho máximo: 10 MB.");
+        }
     }
 }

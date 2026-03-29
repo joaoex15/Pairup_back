@@ -10,6 +10,13 @@ import org.springframework.web.bind.annotation.*;
 
 import java.io.ByteArrayOutputStream;
 
+/**
+ * Proxy de imagens do Google Drive.
+ *
+ * ✅ Este endpoint está protegido pelo SecurityConfig (.anyRequest().authenticated()).
+ *    Apenas usuários com JWT válido conseguem acessar.
+ *    Não é mais necessário listar aqui como permitAll().
+ */
 @RestController
 @RequestMapping("/api/imagens/proxy")
 public class ImagemProxyController {
@@ -17,21 +24,27 @@ public class ImagemProxyController {
     @Autowired
     private Drive googleDriveService;
 
-    /**
-     * Serve a imagem do Google Drive como bytes diretamente.
-     * O frontend usa: /api/imagens/proxy/<fileId>
-     * Sem cookies, sem CORS, sem bloqueio de terceiros.
-     */
     @GetMapping("/{fileId}")
     public ResponseEntity<byte[]> proxyImagem(@PathVariable String fileId) {
+
+        // ✅ Valida que o fileId tem formato aceitável (apenas alfanumérico + hífen/underscore)
+        // Previne path traversal ou injeção de caracteres maliciosos
+        if (fileId == null || !fileId.matches("^[a-zA-Z0-9_\\-]{10,100}$")) {
+            return ResponseEntity.badRequest().build();
+        }
+
         try {
-            // Busca metadados para obter o mimeType
             com.google.api.services.drive.model.File meta = googleDriveService.files()
                     .get(fileId)
                     .setFields("mimeType, name")
                     .execute();
 
-            // Baixa o conteúdo do arquivo
+            // ✅ Garante que só serve tipos de imagem — nunca um PDF, script etc.
+            String mimeType = meta.getMimeType() != null ? meta.getMimeType() : "image/jpeg";
+            if (!mimeType.startsWith("image/")) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
             googleDriveService.files()
                     .get(fileId)
@@ -43,12 +56,9 @@ public class ImagemProxyController {
                 return ResponseEntity.notFound().build();
             }
 
-            // Define o Content-Type correto
-            String mimeType = meta.getMimeType() != null ? meta.getMimeType() : "image/jpeg";
-
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.parseMediaType(mimeType));
-            // Cache por 1 hora no browser
+            // Cache público por 1 hora no browser
             headers.setCacheControl("public, max-age=3600");
 
             return new ResponseEntity<>(imageBytes, headers, HttpStatus.OK);

@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 @AllArgsConstructor
@@ -20,11 +21,15 @@ public class LikeService {
     // ── Consultas públicas ──────────────────────────────────────────────────
 
     public List<Like> listarLikesDados(String pessoaId) {
-        return likeRepository.findByPessoaOrigemId(pessoaId);
+        return likeRepository.findByPessoaOrigemId(pessoaId).stream()
+                .filter(Like::isAtivo)
+                .collect(Collectors.toList());
     }
 
     public List<Like> listarLikesRecebidos(String pessoaId) {
-        return likeRepository.findByPessoaDestinoId(pessoaId);
+        return likeRepository.findByPessoaDestinoId(pessoaId).stream()
+                .filter(Like::isAtivo)
+                .collect(Collectors.toList());
     }
 
     // ── Helpers privados ────────────────────────────────────────────────────

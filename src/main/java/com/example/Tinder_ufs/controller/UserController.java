@@ -2,116 +2,147 @@ package com.example.Tinder_ufs.controller;
 
 import com.example.Tinder_ufs.dto.LoginRequestDTO;
 import com.example.Tinder_ufs.models.User;
+import com.example.Tinder_ufs.security.JwtService;
 import com.example.Tinder_ufs.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
-import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("users")
 @AllArgsConstructor
-@Tag(name = "Usuários", description = "Endpoints para gerenciamento de usuários do sistema")
+@Tag(name = "Usuários", description = "Endpoints para gerenciamento de usuários")
 public class UserController {
+
     private final UserService userService;
+    private final JwtService jwtService;
 
-    @GetMapping
-    @Operation(summary = "Listar todos os usuários", description = "Retorna uma lista com todos os usuários cadastrados")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Lista de usuários retornada com sucesso")
+    /**
+     * ✅ Retorna apenas o usuário autenticado — leitura via JWT.
+     * Removemos getAllUsers() da rota GET / pública; listagem de todos os
+     * usuários é dado sensível e não deve ser exposto sem controle de acesso.
+     */
+    @GetMapping("/me")
+    @Operation(summary = "Obter usuário logado")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Usuário retornado"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado")
     })
-    public ResponseEntity<List<User>> getAllUsers(){
-        return ResponseEntity.ok(userService.getAllUsers());
-    }
-
-    @GetMapping("/{id}")
-    @Operation(summary = "Buscar usuário por ID", description = "Retorna os detalhes de um usuário específico")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Usuário encontrado"),
-            @ApiResponse(responseCode = "404", description = "Usuário não encontrado")
-    })
-    public ResponseEntity<User> getUserById(
-            @Parameter(description = "ID do usuário", required = true, example = "123e4567-e89b-12d3-a456-426614174000")
-            @PathVariable String id){
-        User user = userService.findById(id);
-        if (user != null) {
-            return ResponseEntity.ok(user);
+    public ResponseEntity<?> getMe(HttpServletRequest request) {
+        String userId = (String) request.getAttribute("userId");
+        if (userId == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token ausente ou inválido.");
         }
-        return ResponseEntity.notFound().build();
+
+        User user = userService.findById(userId);
+        if (user == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        // ✅ Nunca retorne a senha — mesmo que esteja hasheada
+        user.setPassword(null);
+        return ResponseEntity.ok(user);
     }
 
-    // NOVO ENDPOINT DE LOGIN (apenas isso foi adicionado)
+    /**
+     * Login: retorna um JWT em caso de sucesso.
+     * ✅ Retorna JSON estruturado com o token (não apenas uma string).
+     */
     @PostMapping("/login")
-    @Operation(summary = "Login de usuário", description = "Autentica um usuário no sistema")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Login realizado com sucesso"),
-            @ApiResponse(responseCode = "401", description = "Senha incorreta"),
-            @ApiResponse(responseCode = "404", description = "Email não encontrado")
+    @Operation(summary = "Login de usuário")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Login realizado"),
+            @ApiResponse(responseCode = "401", description = "Credenciais inválidas")
     })
-    public ResponseEntity<User> login(@RequestBody LoginRequestDTO loginRequest) {
+    public ResponseEntity<?> login(@RequestBody @Valid LoginRequestDTO loginRequest) {
         try {
             User user = userService.login(loginRequest.getEmail(), loginRequest.getPassword());
-            user.setPassword(null); // Não enviar a senha
-            return ResponseEntity.ok(user);
+
+            // ✅ Gera JWT e devolve ao cliente
+            String token = jwtService.generateToken(user.getId().toString());
+
+            return ResponseEntity.ok(Map.of(
+                    "token", token,
+                    "userId", user.getId(),
+                    "email", user.getEmail()
+            ));
         } catch (RuntimeException e) {
-            if (e.getMessage().equals("Email não encontrado")) {
-                return ResponseEntity.status(404).build();
-            } else if (e.getMessage().equals("Senha incorreta")) {
-                return ResponseEntity.status(401).build();
-            }
-            return ResponseEntity.status(500).build();
+            // ✅ Mensagem genérica — não revela se o email existe ou não
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Credenciais inválidas."));
         }
     }
 
+    /**
+     * Criação de conta (público).
+     */
     @PostMapping
-    @Operation(summary = "Criar novo usuário", description = "Cadastra um novo usuário no sistema")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Usuário criado com sucesso"),
+    @Operation(summary = "Criar usuário")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Usuário criado"),
             @ApiResponse(responseCode = "400", description = "Dados inválidos")
     })
     public ResponseEntity<User> createUser(
-            @Parameter(description = "Dados do usuário", required = true)
-            @RequestBody User user){
-        return ResponseEntity.ok(userService.CreatUser(user));
+            @Parameter(description = "Dados do usuário")
+            @RequestBody @Valid User user) {
+
+        User created = userService.CreatUser(user);
+        created.setPassword(null); // ✅ Nunca retorna a senha
+        return ResponseEntity.ok(created);
     }
 
-    @PutMapping("/{id}")
-    @Operation(summary = "Atualizar usuário", description = "Atualiza os dados de um usuário existente")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Usuário atualizado com sucesso"),
-            @ApiResponse(responseCode = "404", description = "Usuário não encontrado"),
-            @ApiResponse(responseCode = "400", description = "Dados inválidos")
+    /**
+     * Atualiza dados do próprio usuário autenticado.
+     * ✅ O ID vem do JWT — o cliente não pode atualizar outro usuário.
+     */
+    @PutMapping("/me")
+    @Operation(summary = "Atualizar meu usuário")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Usuário atualizado"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado")
     })
-    public ResponseEntity<User> updateUserById(
-            @Parameter(description = "ID do usuário", required = true, example = "123e4567-e89b-12d3-a456-426614174000")
-            @PathVariable String id,
+    public ResponseEntity<?> updateMe(
+            @RequestBody @Valid User user,
+            HttpServletRequest request) {
 
-            @Parameter(description = "Dados atualizados do usuário", required = true)
-            @RequestBody User user){
-        user.setId(id);
-        User updatedUser = userService.Update(user);
-        if (updatedUser != null) {
-            return ResponseEntity.ok(updatedUser);
+        String userId = (String) request.getAttribute("userId");
+        if (userId == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token ausente ou inválido.");
         }
-        return ResponseEntity.notFound().build();
+
+        User updated = userService.updateUser(userId, user);
+        updated.setPassword(null);
+        return ResponseEntity.ok(updated);
     }
 
-    @DeleteMapping("/{id}")
-    @Operation(summary = "Deletar usuário", description = "Remove um usuário do sistema")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "204", description = "Usuário deletado com sucesso"),
-            @ApiResponse(responseCode = "404", description = "Usuário não encontrado")
+    /**
+     * Deleta a própria conta.
+     * ✅ O ID vem do JWT.
+     */
+    @DeleteMapping("/me")
+    @Operation(summary = "Deletar minha conta")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Conta deletada"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado")
     })
-    public ResponseEntity<Void> deleteUserById(
-            @Parameter(description = "ID do usuário", required = true, example = "123e4567-e89b-12d3-a456-426614174000")
-            @PathVariable String id){
-        userService.deleteUser(id);
+    public ResponseEntity<?> deleteMe(HttpServletRequest request) {
+        String userId = (String) request.getAttribute("userId");
+        if (userId == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token ausente ou inválido.");
+        }
+
+        userService.deleteUser(userId);
         return ResponseEntity.noContent().build();
     }
 }

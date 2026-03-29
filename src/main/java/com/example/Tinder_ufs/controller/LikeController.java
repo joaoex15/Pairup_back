@@ -2,66 +2,95 @@ package com.example.Tinder_ufs.controller;
 
 import com.example.Tinder_ufs.models.Like;
 import com.example.Tinder_ufs.service.LikeService;
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.*;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
 @RestController
 @RequestMapping("likes")
 @AllArgsConstructor
-@Tag(name = "Likes", description = "Endpoints para gerenciamento de likes entre pessoas")
+@Tag(name = "Likes", description = "Endpoints para gerenciamento de likes")
 public class LikeController {
 
     private final LikeService likeService;
 
+    /**
+     * Registra um like do usuário autenticado em outra pessoa.
+     * ✅ origemId vem do JWT — o cliente nunca pode informar quem está dando o like.
+     *    Isso previne IDOR (dar like fingindo ser outro usuário).
+     */
     @PostMapping
-    @Operation(summary = "Dar um like", description = "Registra um like de uma pessoa para outra")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Like registrado com sucesso"),
+    @Operation(summary = "Dar like")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Like registrado"),
             @ApiResponse(responseCode = "400", description = "Dados inválidos"),
-            @ApiResponse(responseCode = "404", description = "Pessoa não encontrada")
+            @ApiResponse(responseCode = "401", description = "Não autenticado")
     })
-    public ResponseEntity<Void> darLike(
-            @Parameter(description = "ID da pessoa que está dando o like", required = true, example = "123e4567-e89b-12d3-a456-426614174000")
-            @RequestParam String origemId,
+    public ResponseEntity<?> darLike(
+            @Parameter(description = "ID da pessoa que recebe o like")
+            @RequestParam @NotBlank String destinoId,
+            HttpServletRequest request) {
 
-            @Parameter(description = "ID da pessoa que está recebendo o like", required = true, example = "123e4567-e89b-12d3-a456-426614174001")
-            @RequestParam String destinoId
-    ){
-        likeService.darLike(origemId, destinoId);
-        return ResponseEntity.ok().build();
+        // ✅ origemId extraído do JWT — nunca confiamos no cliente para isso
+        String origemId = (String) request.getAttribute("userId");
+        if (origemId == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token ausente ou inválido.");
+        }
+
+        if (origemId.equals(destinoId)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Você não pode dar like em si mesmo.");
+        }
+
+        return ResponseEntity.ok(likeService.darLike(origemId, destinoId));
     }
 
-    @GetMapping("/dados/{pessoaId}")
-    @Operation(summary = "Listar likes dados", description = "Retorna todos os likes que uma pessoa deu")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Lista de likes retornada com sucesso"),
-            @ApiResponse(responseCode = "404", description = "Pessoa não encontrada")
+    /**
+     * Lista os likes que o usuário autenticado deu.
+     * ✅ pessoaId vem do JWT — usuário só pode ver seus próprios likes.
+     */
+    @GetMapping("/dados")
+    @Operation(summary = "Listar likes dados pelo usuário autenticado")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Likes retornados"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado")
     })
-    public ResponseEntity<List<Like>> listarLikesDados(
-            @Parameter(description = "ID da pessoa", required = true, example = "123e4567-e89b-12d3-a456-426614174000")
-            @PathVariable String pessoaId) {
-        List<Like> likes = likeService.listarLikesDados(pessoaId);
-        return ResponseEntity.ok(likes);
+    public ResponseEntity<List<Like>> listarLikesDados(HttpServletRequest request) {
+
+        String pessoaId = (String) request.getAttribute("userId");
+        if (pessoaId == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token ausente ou inválido.");
+        }
+
+        return ResponseEntity.ok(likeService.listarLikesDados(pessoaId));
     }
 
-    @GetMapping("/recebidos/{pessoaId}")
-    @Operation(summary = "Listar likes recebidos", description = "Retorna todos os likes que uma pessoa recebeu")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Lista de likes retornada com sucesso"),
-            @ApiResponse(responseCode = "404", description = "Pessoa não encontrada")
+    /**
+     * Lista os likes que o usuário autenticado recebeu.
+     */
+    @GetMapping("/recebidos")
+    @Operation(summary = "Listar likes recebidos pelo usuário autenticado")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Likes retornados"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado")
     })
-    public ResponseEntity<List<Like>> listarLikesRecebidos(
-            @Parameter(description = "ID da pessoa", required = true, example = "123e4567-e89b-12d3-a456-426614174000")
-            @PathVariable String pessoaId) {
-        List<Like> likes = likeService.listarLikesRecebidos(pessoaId);
-        return ResponseEntity.ok(likes);
+    public ResponseEntity<List<Like>> listarLikesRecebidos(HttpServletRequest request) {
+
+        String pessoaId = (String) request.getAttribute("userId");
+        if (pessoaId == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token ausente ou inválido.");
+        }
+
+        return ResponseEntity.ok(likeService.listarLikesRecebidos(pessoaId));
     }
 }

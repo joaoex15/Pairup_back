@@ -1,18 +1,14 @@
 spring:
   application:
     name: Tinder_ufs
-
   data:
     mongodb:
       uri: ${MONGODB_URI:mongodb://localhost:27017/TINDER}
-      # Remova ou comente as configurações antigas de host/port/database
-
   servlet:
     multipart:
       max-file-size: 10MB
-      max-request-size: 10MB
+      max-request-size: 30MB   # ← era 10MB, aumentar para uploads múltiplos
       enabled: true
-
   security:
     oauth2:
       client:
@@ -26,9 +22,16 @@ spring:
 server:
   port: ${PORT:8080}
 
+# ── JWT ──────────────────────────────────────────────────────
+# NOVA SEÇÃO — obrigatória para o JwtService corrigido
+# No Railway: crie a variável JWT_SECRET com valor aleatório de 64+ chars
+# Gerar localmente: openssl rand -base64 48
+jwt:
+  secret: ${JWT_SECRET}
+
 google:
   drive:
-    application-name: TinderUFS
+    application-name: Pairup
     folder-id: ${GOOGLE_DRIVE_FOLDER_ID:1gw8D9lBqbps_AQ6cdaf4LaeZdYr4pFmw}
 
 file:
