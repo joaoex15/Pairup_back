@@ -8,6 +8,9 @@ import com.example.Tinder_ufs.models.enums.Interesse;
 import com.example.Tinder_ufs.repositories.PessoaRepository;
 import lombok.AllArgsConstructor;
 import org.springframework.beans.BeanUtils;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -19,10 +22,10 @@ public class PessoaService {
 
     private final PessoaRepository pessoaRepository;
 
-    public List<PessoaPerfilDTO> getAllPerfisWithFilters(Interesse interesse, Genero genero) {
+    public Page<PessoaPerfilDTO> getAllPerfisWithFilters(Interesse interesse, Genero genero, Pageable pageable) {
         List<Pessoa> pessoas = pessoaRepository.findByAtivoTrue();
 
-        return pessoas.stream()
+        List<PessoaPerfilDTO> filtered = pessoas.stream()
                 .filter(p -> {
                     if (interesse == null) return true;
                     if (interesse == Interesse.TODOS) {
@@ -36,6 +39,15 @@ public class PessoaService {
                 })
                 .map(this::convertToPerfilDTO)
                 .collect(Collectors.toList());
+
+        int start = (int) pageable.getOffset();
+        int end = Math.min((start + pageable.getPageSize()), filtered.size());
+
+        if (start > filtered.size()) {
+            return Page.empty(pageable);
+        }
+
+        return new PageImpl<>(filtered.subList(start, end), pageable, filtered.size());
     }
 
     public PessoaPerfilDTO getPerfilById(String id) {
@@ -54,7 +66,7 @@ public class PessoaService {
         return convertToRedesSociaisDTO(pessoa);
     }
 
-    public Pessoa findById(String id){
+    public Pessoa findById(String id) {
         return pessoaRepository.findById(id).orElse(null);
     }
 
@@ -62,17 +74,17 @@ public class PessoaService {
         return pessoaRepository.findByUsuarioId(usuarioId).orElse(null);
     }
 
-    public Pessoa create(Pessoa pessoa){
+    public Pessoa create(Pessoa pessoa) {
         if (!pessoa.isMaiorDeIdade()) {
             throw new RuntimeException("A pessoa deve ter pelo menos 18 anos");
         }
         return pessoaRepository.save(pessoa);
     }
 
-    public Pessoa update(Pessoa pessoa){
+    public Pessoa update(Pessoa pessoa) {
         Pessoa existing = findById(pessoa.getId());
 
-        if (existing != null){
+        if (existing != null) {
             if (pessoa.getDataNasc() != null && !pessoa.getDataNasc().equals(existing.getDataNasc())) {
                 if (!pessoa.isMaiorDeIdade()) {
                     throw new RuntimeException("A pessoa deve ter pelo menos 18 anos");
@@ -84,11 +96,11 @@ public class PessoaService {
         return null;
     }
 
-    public void delete(String id){
+    public void delete(String id) {
         pessoaRepository.deleteById(id);
     }
 
-    public Pessoa marcarCienciaResponsabilidade(String id){
+    public Pessoa marcarCienciaResponsabilidade(String id) {
         Pessoa pessoa = findById(id);
         if (pessoa == null) {
             throw new RuntimeException("Pessoa não encontrada");

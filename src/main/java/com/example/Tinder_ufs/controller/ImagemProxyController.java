@@ -1,7 +1,15 @@
 package com.example.Tinder_ufs.controller;
 
 import com.cloudinary.Cloudinary;
-import com.cloudinary.utils.ObjectUtils;
+import com.example.Tinder_ufs.models.Imagem;
+import com.example.Tinder_ufs.models.Pessoa;
+import com.example.Tinder_ufs.security.SecurityUtils;
+import com.example.Tinder_ufs.service.ImagemService;
+import com.example.Tinder_ufs.service.MatchService;
+import com.example.Tinder_ufs.service.PessoaService;
+import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -13,49 +21,98 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.util.Map;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/api/imagens/proxy")
 public class ImagemProxyController {
 
-    @Autowired
-    private Cloudinary cloudinary;
+    private static final Logger log = LoggerFactory.getLogger(ImagemProxyController.class);
+
+    private static final String CLOUDINARY_URL_PREFIX = "https://res.cloudinary.com/";
+    private static final String PUBLIC_ID_REGEX = "^[a-zA-Z0-9][a-zA-Z0-9_/\\-]{8,98}[a-zA-Z0-9]$";
+    private static final Set<String> MIME_ACEITOS = Set.of(
+            "image/jpeg", "image/png", "image/webp", "image/gif"
+    );
+
+    @Autowired private Cloudinary cloudinary;
+    @Autowired private ImagemService imagemService;
+    @Autowired private PessoaService pessoaService;
+    @Autowired private MatchService matchService;
 
     @GetMapping("/{publicId}")
-    public ResponseEntity<byte[]> proxyImagem(@PathVariable String publicId) {
+    public ResponseEntity<byte[]> proxyImagem(
+            @PathVariable String publicId,
+            HttpServletRequest request) {
 
-        // Valida que o publicId tem formato aceitável
-        if (publicId == null || !publicId.matches("^[a-zA-Z0-9_\\-]{10,100}$")) {
+        String userId = SecurityUtils.getUserIdOrThrow(request);
+
+        if (publicId == null || !publicId.matches(PUBLIC_ID_REGEX)) {
             return ResponseEntity.badRequest().build();
         }
 
+        if (!temAcessoAImagem(userId, publicId)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
         try {
-            // Gerar URL segura da imagem no Cloudinary
             String imageUrl = cloudinary.url()
                     .secure(true)
                     .generate(publicId);
 
-            // Baixar a imagem da URL
-            byte[] imageBytes = downloadImage(imageUrl);
+            if (!imageUrl.startsWith(CLOUDINARY_URL_PREFIX)) {
+                log.warn("[Security] URL gerada fora do domínio permitido para publicId hash={}",
+                        publicId.hashCode());
+                return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+            }
 
+            byte[] imageBytes = downloadImage(imageUrl);
             if (imageBytes == null || imageBytes.length == 0) {
                 return ResponseEntity.notFound().build();
             }
 
-            // Detectar mime type pela extensão ou usar padrão
             String mimeType = detectMimeType(publicId);
+
+            if (!MIME_ACEITOS.contains(mimeType)) {
+                return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).build();
+            }
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.parseMediaType(mimeType));
-            headers.setCacheControl("public, max-age=3600");
+            headers.setCacheControl("private, max-age=3600");
 
             return new ResponseEntity<>(imageBytes, headers, HttpStatus.OK);
 
         } catch (Exception e) {
-            System.out.println("[Proxy] Erro ao buscar imagem " + publicId + ": " + e.getMessage());
+            log.error("[Proxy] Erro ao buscar imagem hash={}: {}", publicId.hashCode(), e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
         }
+    }
+
+    /**
+     * Verifica se o usuário tem acesso à imagem.
+     * Acesso permitido se:
+     *  1. O usuário é o dono da imagem, OU
+     *  2. O usuário tem um match ativo com o dono da imagem.
+     */
+    private boolean temAcessoAImagem(String userId, String publicId) {
+        Imagem imagem = imagemService.findByPublicId(publicId);
+        if (imagem == null) return false;
+
+        Pessoa solicitante = pessoaService.findByUsuarioId(userId);
+        if (solicitante == null) return false;
+
+        // ✅ CORREÇÃO AQUI: usa getPessoa().getId() em vez de getPessoaId()
+        Pessoa donoImagem = imagem.getPessoa();
+        if (donoImagem == null) return false;
+
+        String donoImagemId = donoImagem.getId();
+
+        // Caso 1: o solicitante é o dono
+        if (solicitante.getId().equals(donoImagemId)) return true;
+
+        // Caso 2: existe match ativo entre o solicitante e o dono da imagem
+        return matchService.existeMatchAtivo(solicitante.getId(), donoImagemId);
     }
 
     private byte[] downloadImage(String imageUrl) throws Exception {
@@ -78,14 +135,10 @@ public class ImagemProxyController {
     }
 
     private String detectMimeType(String publicId) {
-        if (publicId.endsWith(".png")) {
-            return "image/png";
-        } else if (publicId.endsWith(".gif")) {
-            return "image/gif";
-        } else if (publicId.endsWith(".webp")) {
-            return "image/webp";
-        } else {
-            return "image/jpeg"; // padrão
-        }
+        String lower = publicId.toLowerCase();
+        if (lower.endsWith(".png"))  return "image/png";
+        if (lower.endsWith(".gif"))  return "image/gif";
+        if (lower.endsWith(".webp")) return "image/webp";
+        return "image/jpeg";
     }
 }

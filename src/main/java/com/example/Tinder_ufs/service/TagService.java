@@ -13,19 +13,19 @@ public class TagService {
 
     private final TagRepository tagRepository;
 
-    public List<Tag> getAll(){
+    public List<Tag> getAll() {
         return tagRepository.findAll();
     }
 
-    public Tag create(Tag tag){
+    public Tag create(Tag tag) {
         return tagRepository.save(tag);
     }
 
-    public List<Tag> getAtivas(){
+    public List<Tag> getAtivas() {
         return tagRepository.findByAtivaTrue();
     }
 
-    public void delete(String id){
+    public void delete(String id) {
         tagRepository.deleteById(id);
     }
 }

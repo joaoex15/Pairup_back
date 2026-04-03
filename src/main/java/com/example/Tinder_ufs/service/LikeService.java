@@ -5,6 +5,9 @@ import com.example.Tinder_ufs.models.Match;
 import com.example.Tinder_ufs.repositories.LikeRepository;
 import com.example.Tinder_ufs.repositories.MatchRepository;
 import lombok.AllArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
@@ -20,21 +23,32 @@ public class LikeService {
     private final LikeRepository likeRepository;
     private final MatchRepository matchRepository;
 
-    // ── Consultas públicas ──────────────────────────────────────────────────
-
-    public List<Like> listarLikesDados(String pessoaId) {
-        return likeRepository.findByPessoaOrigemId(pessoaId).stream()
+    public Page<Like> listarLikesDados(String pessoaId, Pageable pageable) {
+        List<Like> likes = likeRepository.findByPessoaOrigemId(pessoaId).stream()
                 .filter(Like::isAtivo)
                 .collect(Collectors.toList());
+
+        return applyPagination(likes, pageable);
     }
 
-    public List<Like> listarLikesRecebidos(String pessoaId) {
-        return likeRepository.findByPessoaDestinoId(pessoaId).stream()
+    public Page<Like> listarLikesRecebidos(String pessoaId, Pageable pageable) {
+        List<Like> likes = likeRepository.findByPessoaDestinoId(pessoaId).stream()
                 .filter(Like::isAtivo)
                 .collect(Collectors.toList());
+
+        return applyPagination(likes, pageable);
     }
 
-    // ── Helpers privados ────────────────────────────────────────────────────
+    private Page<Like> applyPagination(List<Like> list, Pageable pageable) {
+        int start = (int) pageable.getOffset();
+        int end = Math.min((start + pageable.getPageSize()), list.size());
+
+        if (start > list.size()) {
+            return Page.empty(pageable);
+        }
+
+        return new PageImpl<>(list.subList(start, end), pageable, list.size());
+    }
 
     private boolean jaDeuLike(String origemId, String destinoId) {
         return likeRepository
@@ -70,9 +84,8 @@ public class LikeService {
     }
 
     private void criarMatchSeNaoExistir(String pessoa1, String pessoa2) {
-        boolean jaExiste =
-                matchRepository.findByPessoaId1AndPessoaId2(pessoa1, pessoa2).isPresent() ||
-                        matchRepository.findByPessoaId1AndPessoaId2(pessoa2, pessoa1).isPresent();
+        boolean jaExiste = matchRepository.findByPessoaId1AndPessoaId2(pessoa1, pessoa2).isPresent() ||
+                matchRepository.findByPessoaId1AndPessoaId2(pessoa2, pessoa1).isPresent();
 
         if (!jaExiste) {
             Match match = new Match();
@@ -82,8 +95,6 @@ public class LikeService {
             matchRepository.save(match);
         }
     }
-
-    // ── Método principal com retorno ─────────────────────────────────────────
 
     public Map<String, Object> darLike(String origemId, String destinoId) {
         if (origemId.equals(destinoId)) {
