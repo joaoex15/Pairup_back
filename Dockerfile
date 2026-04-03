@@ -12,19 +12,28 @@ COPY src ./src
 RUN mvn clean package -DskipTests -B
 
 # ─── Stage 2: Runtime ──────────────────────────────────────────────────────
-# ─── Stage 2: Runtime ──────────────────────────────────────────────────────
 FROM eclipse-temurin:21-jre-alpine
 
 WORKDIR /app
 
+# Instala curl para healthcheck (opcional)
+RUN apk add --no-cache curl
+
+# Copia o JAR do stage de build
 COPY --from=build /app/target/*.jar app.jar
 
-# NOVO: copia as credenciais do Google Drive
+# Cria diretório para tokens (necessário para OAuth2)
+RUN mkdir -p /app/tokens
 
+# Expõe a porta da aplicação
 EXPOSE 8080
 
-ENV SPRING_DATA_MONGODB_HOST=mongodb
-ENV SPRING_DATA_MONGODB_PORT=27017
-ENV SPRING_DATA_MONGODB_DATABASE=TINDER
+# Configuração de timezone (opcional)
+ENV TZ=America/Sao_Paulo
 
+# Entrypoint com suporte a variáveis de ambiente
 ENTRYPOINT ["java", "-jar", "app.jar"]
+
+# Healthcheck (opcional)
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:8080/actuator/health || exit 1

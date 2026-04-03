@@ -7,27 +7,23 @@ spring:
   servlet:
     multipart:
       max-file-size: 10MB
-      max-request-size: 30MB   # ← era 10MB, aumentar para uploads múltiplos
+      max-request-size: 30MB
       enabled: true
   security:
     oauth2:
       client:
         registration:
           google:
-            client-id: ${GOOGLE_CLIENT_ID}
-            client-secret: ${GOOGLE_CLIENT_SECRET}
+            client-id: ${GOOGLE_CLIENT_ID:}
+            client-secret: ${GOOGLE_CLIENT_SECRET:}
             scope: openid, profile, email
-            redirect-uri: ${BASE_URL}/login/oauth2/code/google
+            redirect-uri: ${BASE_URL:http://localhost:8080}/login/oauth2/code/google
 
 server:
   port: ${PORT:8080}
 
-# ── JWT ──────────────────────────────────────────────────────
-# NOVA SEÇÃO — obrigatória para o JwtService corrigido
-# No Railway: crie a variável JWT_SECRET com valor aleatório de 64+ chars
-# Gerar localmente: openssl rand -base64 48
 jwt:
-  secret: ${JWT_SECRET}
+  secret: ${JWT_SECRET:HQSyRuiN5787c9WGlabcz8oj5rCpxfiAP8KiivHMGSr2qAXZre7iI5z8ZAz1BXw+}
 
 google:
   drive:

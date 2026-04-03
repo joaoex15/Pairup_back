@@ -10,6 +10,8 @@ public interface PessoaRepository extends MongoRepository<Pessoa, String> {
 
     Optional<Pessoa> findByEmail(String email);
 
+    Optional<Pessoa> findByUsuarioId(String usuarioId);
+
     List<Pessoa> findByAtivoTrue();
 
     List<Pessoa> findByGenero(String genero);

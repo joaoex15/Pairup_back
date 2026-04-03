@@ -1,8 +1,65 @@
+# src/test/resources/application-test.yml
+# Ativado automaticamente quando spring.profiles.active=test
+# Garante que os testes NUNCA tocam no banco de produção (TINDER).
 
 spring:
   application:
     name: Tinder_ufs
+
   data:
-  mongodb:
-    url: mongodb://localhost:27017
-    database: TINDER_teste
+    mongodb:
+      # Dentro do Docker usa mongodb_test:27017
+      # Fora do Docker (IDE local) usa localhost:27018
+      uri: ${MONGODB_URI:mongodb://localhost:27018/TINDER_teste}
+
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 30MB
+      enabled: true
+
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID:fake-client-id}
+            client-secret: ${GOOGLE_CLIENT_SECRET:fake-client-secret}
+            scope: openid, profile, email
+            redirect-uri: http://localhost:8080/login/oauth2/code/google
+
+server:
+  port: 8080
+
+jwt:
+  secret: ${JWT_SECRET:HQSyRuiN5787c9WGlabcz8oj5rCpxfiAP8KiivHMGSr2qAXZre7iI5z8ZAz1BXw+}
+
+# Cloudinary — usa as mesmas credenciais do .env injetadas pelo Compose
+# Em ambiente de teste real, seria ideal usar credenciais de sandbox
+cloudinary:
+  cloud-name: ${CLOUDINARY_CLOUD_NAME:}
+  api-key: ${CLOUDINARY_API_KEY:}
+  api-secret: ${CLOUDINARY_API_SECRET:}
+
+google:
+  drive:
+    application-name: Pairup
+    folder-id: ${GOOGLE_DRIVE_FOLDER_ID:fake-folder-id}
+
+file:
+  compress:
+    width: 800
+    height: 800
+    quality: 0.7
+
+logging:
+  level:
+    com.example.Tinder_ufs: DEBUG
+    com.google.api: WARN
+    org.mongodb.driver: INFO
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html

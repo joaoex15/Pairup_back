@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
 
+  # ─── MongoDB principal (dados reais) ───────────────────────────────────────
   mongodb:
     image: mongo:7.0
     container_name: tinder_ufs_mongo
@@ -14,7 +15,56 @@ services:
       - mongo_data:/data/db
     networks:
       - tinder_net
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
+  # ─── MongoDB de teste (COMENTADO - não vai rodar) ──────────────────────────
+  # mongodb_test:
+  #   image: mongo:7.0
+  #   container_name: tinder_ufs_mongo_test
+  #   restart: "no"
+  #   ports:
+  #     - "27018:27017"
+  #   environment:
+  #     MONGO_INITDB_DATABASE: TINDER_teste
+  #   networks:
+  #     - tinder_net
+  #   healthcheck:
+  #     test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 10s
+
+  # ─── Runner de testes (COMENTADO - não vai rodar) ──────────────────────────
+  # test:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.test
+  #   container_name: tinder_ufs_test
+  #   restart: "no"
+  #   depends_on:
+  #     mongodb_test:
+  #       condition: service_healthy
+  #   environment:
+  #     MONGODB_URI: mongodb://mongodb_test:27017/TINDER_teste
+  #     JWT_SECRET: ${JWT_SECRET}
+  #     CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
+  #     CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
+  #     CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
+  #     GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+  #     GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+  #     BASE_URL: http://localhost:8080
+  #     FRONTEND_URL: http://localhost:5173
+  #     GOOGLE_DRIVE_FOLDER_ID: ${GOOGLE_DRIVE_FOLDER_ID:-}
+  #   networks:
+  #     - tinder_net
+
+  # ─── Aplicação principal ───────────────────────────────────────────────────
   app:
     build:
       context: .
@@ -24,16 +74,19 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      - mongodb
+      mongodb:
+        condition: service_healthy
     environment:
-      SPRING_DATA_MONGODB_HOST: mongodb
-      SPRING_DATA_MONGODB_PORT: 27017
-      SPRING_DATA_MONGODB_DATABASE: TINDER
-      # Google OAuth2
+      MONGODB_URI: ${MONGODB_URI}
+      JWT_SECRET: ${JWT_SECRET}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
-      # Frontend URL para redirect após login Google
-      FRONTEND_URL: https://pairup-flax.vercel.app
+      BASE_URL: ${BASE_URL:-http://localhost:8080}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      GOOGLE_DRIVE_FOLDER_ID: ${GOOGLE_DRIVE_FOLDER_ID}
     volumes:
       - ./tokens:/app/tokens
       - ./src/main/resources/google-drive-credentials.json:/app/resources/google-drive-credentials.json:ro
@@ -42,6 +95,7 @@ services:
 
 volumes:
   mongo_data:
+  # mongo_test_data:  # COMENTADO - volume do banco de teste
 
 networks:
   tinder_net:

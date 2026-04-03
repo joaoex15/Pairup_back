@@ -1,0 +1,25 @@
+
+# ─── Dockerfile.test ───────────────────────────────────────────────────────
+# Roda apenas os testes. Não gera JAR de produção.
+# O container termina com exit 0 (sucesso) ou exit 1 (falha),
+# o que faz o service_completed_successfully do Compose funcionar corretamente.
+# ───────────────────────────────────────────────────────────────────────────
+
+FROM maven:3.9.6-eclipse-temurin-21
+
+WORKDIR /app
+
+# Copia pom.xml e baixa dependências primeiro (cache de layers)
+COPY pom.xml .
+RUN mvn dependency:go-offline -B
+
+# Copia o código fonte completo (main + test)
+COPY src ./src
+
+# Copia o application-test.yml para o classpath de testes
+# (já deve estar em src/test/resources/application.yml ou application-test.yml)
+
+# Comando padrão: roda os testes e exibe o relatório resumido no log
+CMD ["mvn", "test", "-B", \
+     "--no-transfer-progress", \
+     "-Dspring.profiles.active=test"]

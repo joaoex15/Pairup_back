@@ -19,7 +19,6 @@ public class PessoaService {
 
     private final PessoaRepository pessoaRepository;
 
-    // Retorna lista de PERFIS (sem redes sociais) com filtros
     public List<PessoaPerfilDTO> getAllPerfisWithFilters(Interesse interesse, Genero genero) {
         List<Pessoa> pessoas = pessoaRepository.findByAtivoTrue();
 
@@ -39,7 +38,6 @@ public class PessoaService {
                 .collect(Collectors.toList());
     }
 
-    // Retorna PERFIL de uma pessoa específica (sem redes sociais)
     public PessoaPerfilDTO getPerfilById(String id) {
         Pessoa pessoa = findById(id);
         if (pessoa == null) {
@@ -48,7 +46,6 @@ public class PessoaService {
         return convertToPerfilDTO(pessoa);
     }
 
-    // Retorna REDES SOCIAIS de uma pessoa (apenas após match)
     public PessoaRedesSociaisDTO getRedesSociaisById(String id) {
         Pessoa pessoa = findById(id);
         if (pessoa == null) {
@@ -57,12 +54,14 @@ public class PessoaService {
         return convertToRedesSociaisDTO(pessoa);
     }
 
-    // Busca pessoa completa por ID (uso interno)
     public Pessoa findById(String id){
         return pessoaRepository.findById(id).orElse(null);
     }
 
-    // Cria nova pessoa com validação de idade
+    public Pessoa findByUsuarioId(String usuarioId) {
+        return pessoaRepository.findByUsuarioId(usuarioId).orElse(null);
+    }
+
     public Pessoa create(Pessoa pessoa){
         if (!pessoa.isMaiorDeIdade()) {
             throw new RuntimeException("A pessoa deve ter pelo menos 18 anos");
@@ -70,7 +69,6 @@ public class PessoaService {
         return pessoaRepository.save(pessoa);
     }
 
-    // Atualiza pessoa com validação de idade
     public Pessoa update(Pessoa pessoa){
         Pessoa existing = findById(pessoa.getId());
 
@@ -80,18 +78,16 @@ public class PessoaService {
                     throw new RuntimeException("A pessoa deve ter pelo menos 18 anos");
                 }
             }
-            BeanUtils.copyProperties(pessoa, existing, "id");
+            BeanUtils.copyProperties(pessoa, existing, "id", "usuarioId");
             return pessoaRepository.save(existing);
         }
         return null;
     }
 
-    // Deleta pessoa
     public void delete(String id){
         pessoaRepository.deleteById(id);
     }
 
-    // Marca ciência de responsabilidade
     public Pessoa marcarCienciaResponsabilidade(String id){
         Pessoa pessoa = findById(id);
         if (pessoa == null) {
@@ -101,7 +97,6 @@ public class PessoaService {
         return pessoaRepository.save(pessoa);
     }
 
-    // Converte Pessoa → PessoaPerfilDTO (remove redes sociais e flags internas)
     private PessoaPerfilDTO convertToPerfilDTO(Pessoa pessoa) {
         PessoaPerfilDTO dto = new PessoaPerfilDTO();
         dto.setId(pessoa.getId());
@@ -116,7 +111,6 @@ public class PessoaService {
         return dto;
     }
 
-    // Converte Pessoa → PessoaRedesSociaisDTO (apenas redes sociais)
     private PessoaRedesSociaisDTO convertToRedesSociaisDTO(Pessoa pessoa) {
         PessoaRedesSociaisDTO dto = new PessoaRedesSociaisDTO();
         dto.setId(pessoa.getId());

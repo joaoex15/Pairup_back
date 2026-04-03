@@ -28,11 +28,6 @@ public class UserController {
     private final UserService userService;
     private final JwtService jwtService;
 
-    /**
-     * ✅ Retorna apenas o usuário autenticado — leitura via JWT.
-     * Removemos getAllUsers() da rota GET / pública; listagem de todos os
-     * usuários é dado sensível e não deve ser exposto sem controle de acesso.
-     */
     @GetMapping("/me")
     @Operation(summary = "Obter usuário logado")
     @ApiResponses({
@@ -50,15 +45,10 @@ public class UserController {
             return ResponseEntity.notFound().build();
         }
 
-        // ✅ Nunca retorne a senha — mesmo que esteja hasheada
         user.setPassword(null);
         return ResponseEntity.ok(user);
     }
 
-    /**
-     * Login: retorna um JWT em caso de sucesso.
-     * ✅ Retorna JSON estruturado com o token (não apenas uma string).
-     */
     @PostMapping("/login")
     @Operation(summary = "Login de usuário")
     @ApiResponses({
@@ -69,7 +59,6 @@ public class UserController {
         try {
             User user = userService.login(loginRequest.getEmail(), loginRequest.getPassword());
 
-            // ✅ Gera JWT e devolve ao cliente
             String token = jwtService.generateToken(user.getId().toString());
 
             return ResponseEntity.ok(Map.of(
@@ -78,34 +67,28 @@ public class UserController {
                     "email", user.getEmail()
             ));
         } catch (RuntimeException e) {
-            // ✅ Mensagem genérica — não revela se o email existe ou não
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Credenciais inválidas."));
         }
     }
 
-    /**
-     * Criação de conta (público).
-     */
     @PostMapping
     @Operation(summary = "Criar usuário")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Usuário criado"),
             @ApiResponse(responseCode = "400", description = "Dados inválidos")
     })
-    public ResponseEntity<User> createUser(
-            @Parameter(description = "Dados do usuário")
-            @RequestBody @Valid User user) {
-
-        User created = userService.CreatUser(user);
-        created.setPassword(null); // ✅ Nunca retorna a senha
-        return ResponseEntity.ok(created);
+    public ResponseEntity<?> createUser(@RequestBody @Valid User user) {
+        try {
+            User created = userService.createUser(user);
+            created.setPassword(null);
+            return ResponseEntity.ok(created);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Map.of("error", e.getMessage()));
+        }
     }
 
-    /**
-     * Atualiza dados do próprio usuário autenticado.
-     * ✅ O ID vem do JWT — o cliente não pode atualizar outro usuário.
-     */
     @PutMapping("/me")
     @Operation(summary = "Atualizar meu usuário")
     @ApiResponses({
@@ -126,10 +109,6 @@ public class UserController {
         return ResponseEntity.ok(updated);
     }
 
-    /**
-     * Deleta a própria conta.
-     * ✅ O ID vem do JWT.
-     */
     @DeleteMapping("/me")
     @Operation(summary = "Deletar minha conta")
     @ApiResponses({

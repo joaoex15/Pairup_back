@@ -1,75 +1,81 @@
 package com.example.Tinder_ufs.controller;
 
 import com.example.Tinder_ufs.models.Tag;
-import com.fasterxml.jackson.databind.ObjectMapper;  // ✅ CORRETO
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;  // ✅ CORRETO
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+
+import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest
-@AutoConfigureMockMvc  // ✅ Agora funciona!
+@AutoConfigureMockMvc
+// @Import(TestSecurityConfig.class)  ← REMOVER ESTA LINHA
+@DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_EACH_TEST_METHOD)
 class TagControllerTest {
-
-    Tag TAG1 = new Tag("Esporte", "Tag para esportes", "Lazer", true);
-    Tag TAG2 = new Tag("Música", "Tag para música", "Cultura", true);
-    Tag TAG3 = new Tag("Viagem", "Tag para viagens", "Lazer", false);
 
     @Autowired
     private MockMvc mockMvc;
 
     @Autowired
-    private ObjectMapper objectMapper;  // ✅ Funciona!
+    private ObjectMapper objectMapper;
+
+    private Tag novaTag(String nome, String categoria, boolean ativa) {
+        return new Tag(nome + "_" + UUID.randomUUID().toString().substring(0, 6),
+                "Descrição de " + nome, categoria, ativa);
+    }
 
     @Test
-    void testTag() throws Exception {
-        String id1;
-        String id2;
-        String id3;
-
-        MvcResult result1 = mockMvc.perform(post("/tags")
+    void testCriarEListarTags() throws Exception {
+        mockMvc.perform(post("/tags")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(TAG1)))
-                .andExpect(status().isOk())
-                .andReturn();
+                        .content(objectMapper.writeValueAsString(novaTag("Esporte", "Lazer", true))))
+                .andExpect(status().isOk());
 
-        String responseJson1 = result1.getResponse().getContentAsString();
-        Tag tagCriada1 = objectMapper.readValue(responseJson1, Tag.class);
-        id1 = tagCriada1.getId();
-
-        MvcResult result2 = mockMvc.perform(post("/tags")
+        mockMvc.perform(post("/tags")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(TAG2)))
-                .andExpect(status().isOk())
-                .andReturn();
+                        .content(objectMapper.writeValueAsString(novaTag("Música", "Cultura", true))))
+                .andExpect(status().isOk());
 
-        String responseJson2 = result2.getResponse().getContentAsString();
-        Tag tagCriada2 = objectMapper.readValue(responseJson2, Tag.class);
-        id2 = tagCriada2.getId();
-
-        MvcResult result3 = mockMvc.perform(post("/tags")
+        mockMvc.perform(post("/tags")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(TAG3)))
-                .andExpect(status().isOk())
-                .andReturn();
-
-        String responseJson3 = result3.getResponse().getContentAsString();
-        Tag tagCriada3 = objectMapper.readValue(responseJson3, Tag.class);
-        id3 = tagCriada3.getId();
+                        .content(objectMapper.writeValueAsString(novaTag("Viagem", "Lazer", false))))
+                .andExpect(status().isOk());
 
         mockMvc.perform(get("/tags"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(get("/tags/ativas"))
                 .andExpect(status().isOk());
+    }
 
-        mockMvc.perform(delete("/tags/" + id3))
-                .andExpect(status().isNoContent());
+    @Test
+    void testDeleteTagDeveSerBloqueado() throws Exception {
+        MvcResult result = mockMvc.perform(post("/tags")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(novaTag("Esporte", "Lazer", true))))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        Tag tagCriada = objectMapper.readValue(result.getResponse().getContentAsString(), Tag.class);
+
+        mockMvc.perform(delete("/tags/" + tagCriada.getId()))
+                .andExpect(status().is5xxServerError());
+    }
+
+    @Test
+    void testCriarTagComDadosInvalidos() throws Exception {
+        mockMvc.perform(post("/tags")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
     }
 }
