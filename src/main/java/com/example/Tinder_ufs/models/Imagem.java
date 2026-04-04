@@ -8,8 +8,10 @@ import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.DBRef;
 import org.springframework.data.mongodb.core.mapping.Document;
 
-import javax.validation.constraints.NotBlank;
-import javax.validation.constraints.Pattern;
+// ✅ MUDE DE javax.validation PARA jakarta.validation
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+
 import java.time.LocalDateTime;
 
 @Document(collection = "imagem")
@@ -24,16 +26,16 @@ public class Imagem {
     @DBRef
     private Pessoa pessoa;
 
-    @NotBlank
+    @NotBlank(message = "URL é obrigatória")
     @Pattern(regexp = "^https://res\\.cloudinary\\.com/.*", message = "URL inválida do Cloudinary")
     private String url;
 
-    @NotBlank
+    @NotBlank(message = "PublicId é obrigatório")
     @Indexed(unique = true)
     private String publicId;
 
-    @NotBlank
-    private String folderPath; // Pasta do usuário (ex: "tinder_ufs_fotos/usuario_123")
+    @NotBlank(message = "FolderPath é obrigatório")
+    private String folderPath;
 
     private boolean perfil = false;
 
