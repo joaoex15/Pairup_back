@@ -38,16 +38,10 @@ public class PessoaCompletaDTO {
 
     // ==================== MÉTODOS AUXILIARES ====================
 
-    /**
-     * Verifica se o usuário tem foto de perfil
-     */
     public boolean hasFotoPerfil() {
         return fotoPerfilUrl != null && !fotoPerfilUrl.isEmpty();
     }
 
-    /**
-     * Retorna a quantidade de imagens na galeria (excluindo foto de perfil)
-     */
     public int getQuantidadeGaleria() {
         if (imagens == null) return 0;
         if (fotoPerfilUrl == null) return imagens.size();
@@ -56,9 +50,6 @@ public class PessoaCompletaDTO {
                 .count();
     }
 
-    /**
-     * Retorna todas as imagens exceto a foto de perfil
-     */
     public List<Imagem> getImagensGaleria() {
         if (imagens == null || fotoPerfilUrl == null) return imagens;
         return imagens.stream()
@@ -66,9 +57,6 @@ public class PessoaCompletaDTO {
                 .toList();
     }
 
-    /**
-     * Verifica se o perfil está completo
-     */
     public boolean isPerfilCompleto() {
         return nome != null && !nome.isEmpty()
                 && curso != null && !curso.isEmpty()

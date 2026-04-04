@@ -3,7 +3,6 @@ package com.example.Tinder_ufs.dto;
 import com.example.Tinder_ufs.models.Imagem;
 import com.example.Tinder_ufs.models.enums.Genero;
 import com.example.Tinder_ufs.models.enums.Interesse;
-import com.example.Tinder_ufs.models.Tag;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Data;
 
@@ -23,7 +22,9 @@ public class PessoaPerfilDTO {
     private Genero genero;
     private Interesse interesse;
     private String descricao;
-    private List<Tag> tags;
+
+    // ✅ CORRIGIDO: mudado de List<Tag> para List<String>
+    private List<String> tags;
 
     // ==================== CAMPOS ADICIONADOS ====================
 
@@ -33,7 +34,7 @@ public class PessoaPerfilDTO {
     /** URL da foto de perfil */
     private String fotoPerfilUrl;
 
-    // ==================== MÉTODOS AUXILIARES (opcional) ====================
+    // ==================== MÉTODOS AUXILIARES ====================
 
     /**
      * Verifica se o usuário tem foto de perfil
