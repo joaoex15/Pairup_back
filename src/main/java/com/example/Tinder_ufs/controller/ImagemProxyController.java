@@ -2,19 +2,15 @@ package com.example.Tinder_ufs.controller;
 
 import com.cloudinary.Cloudinary;
 import com.example.Tinder_ufs.models.Imagem;
-import com.example.Tinder_ufs.models.Pessoa;
 import com.example.Tinder_ufs.security.SecurityUtils;
 import com.example.Tinder_ufs.service.ImagemService;
 import com.example.Tinder_ufs.service.MatchService;
 import com.example.Tinder_ufs.service.PessoaService;
+import com.example.Tinder_ufs.service.AuditLogService;
 import jakarta.servlet.http.HttpServletRequest;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.ByteArrayOutputStream;
@@ -23,22 +19,23 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Set;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/imagens/proxy")
+@RequiredArgsConstructor
 public class ImagemProxyController {
 
-    private static final Logger log = LoggerFactory.getLogger(ImagemProxyController.class);
+    private final Cloudinary cloudinary;
+    private final ImagemService imagemService;
+    private final PessoaService pessoaService;
+    private final MatchService matchService;
+    private final AuditLogService auditLogService;
 
     private static final String CLOUDINARY_URL_PREFIX = "https://res.cloudinary.com/";
     private static final String PUBLIC_ID_REGEX = "^[a-zA-Z0-9][a-zA-Z0-9_/\\-]{8,98}[a-zA-Z0-9]$";
     private static final Set<String> MIME_ACEITOS = Set.of(
             "image/jpeg", "image/png", "image/webp", "image/gif"
     );
-
-    @Autowired private Cloudinary cloudinary;
-    @Autowired private ImagemService imagemService;
-    @Autowired private PessoaService pessoaService;
-    @Autowired private MatchService matchService;
 
     @GetMapping("/{publicId}")
     public ResponseEntity<byte[]> proxyImagem(
@@ -47,11 +44,15 @@ public class ImagemProxyController {
 
         String userId = SecurityUtils.getUserIdOrThrow(request);
 
+        // Validação do publicId
         if (publicId == null || !publicId.matches(PUBLIC_ID_REGEX)) {
+            auditLogService.logSecurityViolation(userId, "Tentativa de acesso com publicId inválido: " + publicId);
             return ResponseEntity.badRequest().build();
         }
 
+        // Verificação de acesso
         if (!temAcessoAImagem(userId, publicId)) {
+            auditLogService.logSecurityViolation(userId, "Tentativa de acesso não autorizado à imagem: " + publicId);
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
 
@@ -61,8 +62,7 @@ public class ImagemProxyController {
                     .generate(publicId);
 
             if (!imageUrl.startsWith(CLOUDINARY_URL_PREFIX)) {
-                log.warn("[Security] URL gerada fora do domínio permitido para publicId hash={}",
-                        publicId.hashCode());
+                log.warn("[Security] URL gerada fora do domínio permitido para publicId: {}", publicId);
                 return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
             }
 
@@ -72,10 +72,12 @@ public class ImagemProxyController {
             }
 
             String mimeType = detectMimeType(publicId);
-
             if (!MIME_ACEITOS.contains(mimeType)) {
                 return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).build();
             }
+
+            // Log de acesso bem-sucedido
+            auditLogService.logImageAccess(userId, publicId, "PROXY_ACCESS");
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.parseMediaType(mimeType));
@@ -84,35 +86,26 @@ public class ImagemProxyController {
             return new ResponseEntity<>(imageBytes, headers, HttpStatus.OK);
 
         } catch (Exception e) {
-            log.error("[Proxy] Erro ao buscar imagem hash={}: {}", publicId.hashCode(), e.getMessage());
+            log.error("[Proxy] Erro ao buscar imagem {}: {}", publicId, e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
         }
     }
 
-    /**
-     * Verifica se o usuário tem acesso à imagem.
-     * Acesso permitido se:
-     *  1. O usuário é o dono da imagem, OU
-     *  2. O usuário tem um match ativo com o dono da imagem.
-     */
     private boolean temAcessoAImagem(String userId, String publicId) {
         Imagem imagem = imagemService.findByPublicId(publicId);
-        if (imagem == null) return false;
+        if (imagem == null || !imagem.isAtiva()) return false;
 
-        Pessoa solicitante = pessoaService.findByUsuarioId(userId);
+        var solicitante = pessoaService.findByUsuarioId(userId);
         if (solicitante == null) return false;
 
-        // ✅ CORREÇÃO AQUI: usa getPessoa().getId() em vez de getPessoaId()
-        Pessoa donoImagem = imagem.getPessoa();
+        var donoImagem = imagem.getPessoa();
         if (donoImagem == null) return false;
 
-        String donoImagemId = donoImagem.getId();
+        // Dono da imagem tem acesso
+        if (solicitante.getId().equals(donoImagem.getId())) return true;
 
-        // Caso 1: o solicitante é o dono
-        if (solicitante.getId().equals(donoImagemId)) return true;
-
-        // Caso 2: existe match ativo entre o solicitante e o dono da imagem
-        return matchService.existeMatchAtivo(solicitante.getId(), donoImagemId);
+        // Verificar match ativo
+        return matchService.existeMatchAtivo(solicitante.getId(), donoImagem.getId());
     }
 
     private byte[] downloadImage(String imageUrl) throws Exception {
@@ -136,8 +129,8 @@ public class ImagemProxyController {
 
     private String detectMimeType(String publicId) {
         String lower = publicId.toLowerCase();
-        if (lower.endsWith(".png"))  return "image/png";
-        if (lower.endsWith(".gif"))  return "image/gif";
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".gif")) return "image/gif";
         if (lower.endsWith(".webp")) return "image/webp";
         return "image/jpeg";
     }

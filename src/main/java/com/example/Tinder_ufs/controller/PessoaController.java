@@ -1,5 +1,6 @@
 package com.example.Tinder_ufs.controller;
 
+import com.example.Tinder_ufs.dto.PessoaCompletaDTO;
 import com.example.Tinder_ufs.dto.PessoaPerfilDTO;
 import com.example.Tinder_ufs.models.Pessoa;
 import com.example.Tinder_ufs.models.enums.Genero;
@@ -22,8 +23,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 @RestController
-@RequestMapping("pessoas")
+@RequestMapping("/pessoas")
 @AllArgsConstructor
 @Tag(name = "Pessoas", description = "Endpoints para gerenciamento de pessoas")
 public class PessoaController {
@@ -49,7 +52,6 @@ public class PessoaController {
             @PageableDefault(size = 20) Pageable pageable,
             HttpServletRequest request) {
 
-        // ✅ Exige autenticação para ver perfis
         SecurityUtils.getUserIdOrThrow(request);
 
         return ResponseEntity.ok(
@@ -72,7 +74,6 @@ public class PessoaController {
             @PathVariable String id,
             HttpServletRequest request) {
 
-        // ✅ Exige autenticação
         SecurityUtils.getUserIdOrThrow(request);
 
         PessoaPerfilDTO dto = pessoaService.getPerfilById(id);
@@ -82,8 +83,6 @@ public class PessoaController {
 
     /**
      * Redes sociais — disponível APENAS via /matches/{matchId}/redes-sociais.
-     * ✅ Retorna 403 explícito em vez de lançar RuntimeException.
-     *    RuntimeException pode vazar stack trace; ResponseEntity não.
      */
     @GetMapping("/{id}/redes-sociais")
     @Operation(summary = "Buscar redes sociais da pessoa",
@@ -92,57 +91,83 @@ public class PessoaController {
             @ApiResponse(responseCode = "403", description = "Acesso direto não permitido")
     })
     public ResponseEntity<Void> getRedesSociaisById(@PathVariable String id) {
-        // ✅ 403 explícito — nunca RuntimeException que poderia vazar detalhes internos
         return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
     }
 
     /**
      * Cria perfil vinculado ao usuário autenticado.
-     * ✅ Exige JWT — impede criação de perfis em massa por bots.
-     * ✅ userId vem do token — o cliente nunca pode vincular o perfil a outro usuário.
-     * ✅ Log de auditoria registra criação de perfil.
+     * ✅ Verifica se cienciaResponsabilidade = TRUE antes de criar
+     * ✅ userId vem do token — o cliente nunca pode vincular o perfil a outro usuário
      */
     @PostMapping
     @Operation(summary = "Criar meu perfil")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Perfil criado"),
-            @ApiResponse(responseCode = "400", description = "Dados inválidos"),
+            @ApiResponse(responseCode = "400", description = "Dados inválidos ou termos não aceitos"),
             @ApiResponse(responseCode = "401", description = "Não autenticado"),
             @ApiResponse(responseCode = "409", description = "Perfil já existe para este usuário")
     })
-    public ResponseEntity<Pessoa> create(
+    public ResponseEntity<?> create(
             @RequestBody @Valid Pessoa pessoa,
             HttpServletRequest request) {
 
-        // ✅ userId vem do JWT — nunca do corpo da requisição
         String userId = SecurityUtils.getUserIdOrThrow(request);
 
-        // Previne que o cliente tente setar o usuarioId manualmente
+        // ✅ VERIFICAÇÃO OBRIGATÓRIA: ciência de responsabilidade deve ser TRUE
+        if (!pessoa.isCienciaResponsabilidade()) {
+            log.warn("[AUDIT] Tentativa de criar perfil sem aceitar termos - userId={}", userId);
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", "É necessário aceitar os termos de responsabilidade para criar uma conta"));
+        }
+
+        // Verifica se já existe perfil para este usuário
+        if (pessoaService.findByUsuarioId(userId) != null) {
+            return ResponseEntity
+                    .status(HttpStatus.CONFLICT)
+                    .body(Map.of("error", "Perfil já existe para este usuário"));
+        }
+
         pessoa.setUsuarioId(userId);
 
-        Pessoa criada = pessoaService.create(pessoa);
-        log.info("[AUDIT] Perfil criado para userId={}", userId);
-        return ResponseEntity.ok(criada);
+        try {
+            Pessoa criada = pessoaService.create(pessoa);
+            log.info("[AUDIT] Perfil criado com sucesso - userId={}, aceitouTermos={}", userId, true);
+            return ResponseEntity.ok(criada);
+        } catch (RuntimeException e) {
+            log.error("[AUDIT] Erro ao criar perfil - userId={}, erro={}", userId, e.getMessage());
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
+        }
     }
 
-    /** Retorna o perfil do usuário autenticado. */
+    /**
+     * Retorna o perfil COMPLETO do usuário autenticado (com imagens e redes sociais).
+     * ✅ Retorna PessoaCompletaDTO com todas as informações
+     */
     @GetMapping("/me")
-    @Operation(summary = "Obter meu perfil")
+    @Operation(summary = "Obter meu perfil completo")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Perfil retornado"),
+            @ApiResponse(responseCode = "200", description = "Perfil completo retornado"),
             @ApiResponse(responseCode = "401", description = "Não autenticado"),
             @ApiResponse(responseCode = "404", description = "Perfil não encontrado")
     })
-    public ResponseEntity<PessoaPerfilDTO> getMyProfile(HttpServletRequest request) {
+    public ResponseEntity<PessoaCompletaDTO> getMyProfile(HttpServletRequest request) {
         String userId = SecurityUtils.getUserIdOrThrow(request);
 
-        Pessoa pessoa = pessoaService.findByUsuarioId(userId);
-        if (pessoa == null) return ResponseEntity.notFound().build();
+        PessoaCompletaDTO pessoaCompleta = pessoaService.getPessoaCompletaByUsuarioId(userId);
+        if (pessoaCompleta == null) {
+            return ResponseEntity.notFound().build();
+        }
 
-        return ResponseEntity.ok(pessoaService.getPerfilById(pessoa.getId()));
+        log.info("[AUDIT] Perfil completo acessado - userId={}", userId);
+        return ResponseEntity.ok(pessoaCompleta);
     }
 
-    /** Atualiza o perfil do usuário autenticado. */
+    /**
+     * Atualiza o perfil do usuário autenticado.
+     */
     @PutMapping("/me")
     @Operation(summary = "Atualizar meu perfil")
     @ApiResponses({
@@ -150,41 +175,62 @@ public class PessoaController {
             @ApiResponse(responseCode = "401", description = "Não autenticado"),
             @ApiResponse(responseCode = "404", description = "Perfil não encontrado")
     })
-    public ResponseEntity<Pessoa> updateMe(
+    public ResponseEntity<?> updateMe(
             @RequestBody @Valid Pessoa pessoa,
             HttpServletRequest request) {
 
         String userId = SecurityUtils.getUserIdOrThrow(request);
 
         Pessoa existing = pessoaService.findByUsuarioId(userId);
-        if (existing == null) return ResponseEntity.notFound().build();
+        if (existing == null) {
+            return ResponseEntity.notFound().build();
+        }
 
-        // ✅ Garante que o ID não pode ser substituído pelo corpo da requisição
         pessoa.setId(existing.getId());
         pessoa.setUsuarioId(userId);
 
-        return ResponseEntity.ok(pessoaService.update(pessoa));
+        try {
+            Pessoa atualizada = pessoaService.update(pessoa);
+            log.info("[AUDIT] Perfil atualizado - userId={}", userId);
+            return ResponseEntity.ok(atualizada);
+        } catch (RuntimeException e) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
+        }
     }
 
-    /** Marca ciência de responsabilidade do usuário autenticado. */
+    /**
+     * Marca ciência de responsabilidade do usuário autenticado.
+     */
     @PatchMapping("/me/ciencia-responsabilidade")
     @Operation(summary = "Marcar ciência de responsabilidade")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Marcado com sucesso"),
-            @ApiResponse(responseCode = "401", description = "Não autenticado")
+            @ApiResponse(responseCode = "401", description = "Não autenticado"),
+            @ApiResponse(responseCode = "404", description = "Perfil não encontrado")
     })
-    public ResponseEntity<Pessoa> marcarCienciaResponsabilidade(HttpServletRequest request) {
+    public ResponseEntity<?> marcarCienciaResponsabilidade(HttpServletRequest request) {
         String userId = SecurityUtils.getUserIdOrThrow(request);
 
         Pessoa pessoa = pessoaService.findByUsuarioId(userId);
-        if (pessoa == null) return ResponseEntity.notFound().build();
+        if (pessoa == null) {
+            return ResponseEntity.notFound().build();
+        }
 
-        return ResponseEntity.ok(pessoaService.marcarCienciaResponsabilidade(pessoa.getId()));
+        try {
+            Pessoa atualizada = pessoaService.marcarCienciaResponsabilidade(pessoa.getId());
+            log.info("[AUDIT] Ciência de responsabilidade marcada - userId={}", userId);
+            return ResponseEntity.ok(atualizada);
+        } catch (RuntimeException e) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
+        }
     }
 
     /**
      * Deleta o perfil do usuário autenticado.
-     * ✅ Log de auditoria antes da exclusão.
      */
     @DeleteMapping("/me")
     @Operation(summary = "Deletar meu perfil")
@@ -197,7 +243,7 @@ public class PessoaController {
 
         Pessoa pessoa = pessoaService.findByUsuarioId(userId);
         if (pessoa != null) {
-            log.info("[AUDIT] Perfil deletado para userId={}", userId);
+            log.info("[AUDIT] Perfil deletado - userId={}", userId);
             pessoaService.delete(pessoa.getId());
         }
         return ResponseEntity.noContent().build();

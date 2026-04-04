@@ -16,24 +16,31 @@ FROM eclipse-temurin:21-jre-alpine
 
 WORKDIR /app
 
-# Instala curl para healthcheck (opcional)
+# Instala curl para healthcheck
 RUN apk add --no-cache curl
 
 # Copia o JAR do stage de build
 COPY --from=build /app/target/*.jar app.jar
 
-# Cria diretório para tokens (necessário para OAuth2)
-RUN mkdir -p /app/tokens
+# Cria diretórios necessários
+RUN mkdir -p /app/logs /app/uploads /app/tokens
 
 # Expõe a porta da aplicação
 EXPOSE 8080
 
-# Configuração de timezone (opcional)
+# Configuração de timezone
 ENV TZ=America/Sao_Paulo
+ENV JAVA_OPTS="-Xmx512m -Xms256m -XX:+UseG1GC"
 
-# Entrypoint com suporte a variáveis de ambiente
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Usuário não-root para segurança
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup && \
+    chown -R appuser:appgroup /app
 
-# Healthcheck (opcional)
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+USER appuser
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
   CMD curl -f http://localhost:8080/actuator/health || exit 1
+
+# Entrypoint
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

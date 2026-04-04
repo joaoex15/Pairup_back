@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-
   # ─── MongoDB principal (dados reais) ───────────────────────────────────────
   mongodb:
     image: mongo:7.0
@@ -11,8 +10,11 @@ services:
       - "27017:27017"
     environment:
       MONGO_INITDB_DATABASE: TINDER
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-admin123}
     volumes:
       - mongo_data:/data/db
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
     networks:
       - tinder_net
     healthcheck:
@@ -22,53 +24,13 @@ services:
       retries: 5
       start_period: 10s
 
-  # ─── MongoDB de teste (COMENTADO - não vai rodar) ──────────────────────────
-  # mongodb_test:
-  #   image: mongo:7.0
-  #   container_name: tinder_ufs_mongo_test
-  #   restart: "no"
-  #   ports:
-  #     - "27018:27017"
-  #   environment:
-  #     MONGO_INITDB_DATABASE: TINDER_teste
-  #   networks:
-  #     - tinder_net
-  #   healthcheck:
-  #     test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
-  #     start_period: 10s
-
-  # ─── Runner de testes (COMENTADO - não vai rodar) ──────────────────────────
-  # test:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile.test
-  #   container_name: tinder_ufs_test
-  #   restart: "no"
-  #   depends_on:
-  #     mongodb_test:
-  #       condition: service_healthy
-  #   environment:
-  #     MONGODB_URI: mongodb://mongodb_test:27017/TINDER_teste
-  #     JWT_SECRET: ${JWT_SECRET}
-  #     CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
-  #     CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
-  #     CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
-  #     GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-  #     GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-  #     BASE_URL: http://localhost:8080
-  #     FRONTEND_URL: http://localhost:5173
-  #     GOOGLE_DRIVE_FOLDER_ID: ${GOOGLE_DRIVE_FOLDER_ID:-}
-  #   networks:
-  #     - tinder_net
-
   # ─── Aplicação principal ───────────────────────────────────────────────────
   app:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - JAR_FILE=build/libs/*.jar
     container_name: tinder_ufs_app
     restart: unless-stopped
     ports:
@@ -77,26 +39,92 @@ services:
       mongodb:
         condition: service_healthy
     environment:
-      MONGODB_URI: ${MONGODB_URI}
+      # MongoDB
+      MONGODB_URI: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-admin123}@mongodb:27017/TINDER?authSource=admin
+
+      # JWT
       JWT_SECRET: ${JWT_SECRET}
+
+      # Cloudinary
       CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
       CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
       CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
+
+      # Google OAuth2
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       BASE_URL: ${BASE_URL:-http://localhost:8080}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000,http://localhost:5173}
+
+      # Google Drive
       GOOGLE_DRIVE_FOLDER_ID: ${GOOGLE_DRIVE_FOLDER_ID}
+      GOOGLE_DRIVE_CREDENTIALS_PATH: ${GOOGLE_DRIVE_CREDENTIALS_PATH:-/app/resources/google-drive-credentials.json}
+
+      # App Config
+      APP_MAX_IMAGES_PER_USER: ${APP_MAX_IMAGES_PER_USER:-10}
+      APP_MAX_FILE_SIZE_MB: ${APP_MAX_FILE_SIZE_MB:-5}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
+
+      # Java Options
+      JAVA_OPTS: "-Xmx512m -Xms256m -XX:+UseG1GC -Duser.timezone=UTC"
+
     volumes:
+      - ./logs:/app/logs
       - ./tokens:/app/tokens
       - ./src/main/resources/google-drive-credentials.json:/app/resources/google-drive-credentials.json:ro
+      - ./uploads:/app/uploads
     networks:
       - tinder_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ─── Redis para rate limiting (opcional) ───────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: tinder_ufs_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    volumes:
+      - redis_data:/data
+    networks:
+      - tinder_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Nginx para proxy reverso (opcional - produção) ───────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: tinder_ufs_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - app
+    networks:
+      - tinder_net
+    profiles:
+      - production
 
 volumes:
   mongo_data:
-  # mongo_test_data:  # COMENTADO - volume do banco de teste
+    driver: local
+  redis_data:
+    driver: local
 
 networks:
   tinder_net:
     driver: bridge
+    name: tinder_network
