@@ -2,12 +2,12 @@ package com.example.Tinder_ufs.controller;
 
 import com.cloudinary.Cloudinary;
 import com.example.Tinder_ufs.models.Imagem;
+import com.example.Tinder_ufs.models.Pessoa;
 import com.example.Tinder_ufs.security.SecurityUtils;
+import com.example.Tinder_ufs.service.AuditLogService;
 import com.example.Tinder_ufs.service.ImagemService;
 import com.example.Tinder_ufs.service.MatchService;
 import com.example.Tinder_ufs.service.PessoaService;
-import com.example.Tinder_ufs.service.AuditLogService;
-import com.example.Tinder_ufs.models.Pessoa;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,56 +33,114 @@ public class ImagemProxyController {
     private final AuditLogService auditLogService;
 
     private static final String CLOUDINARY_URL_PREFIX = "https://res.cloudinary.com/";
-    private static final String PUBLIC_ID_REGEX = "^[a-zA-Z0-9][a-zA-Z0-9_/\\-]{8,98}[a-zA-Z0-9]$";
     private static final Set<String> MIME_ACEITOS = Set.of(
             "image/jpeg", "image/png", "image/webp", "image/gif"
     );
+
+    /**
+     * ✅ Valida se o publicId é seguro (previne path traversal)
+     */
+    private boolean isValidPublicId(String publicId) {
+        if (publicId == null || publicId.trim().isEmpty()) {
+            return false;
+        }
+
+        // Prevenir path traversal
+        if (publicId.contains("..") ||
+                publicId.contains("./") ||
+                publicId.contains("\\") ||
+                publicId.contains("%2e") ||
+                publicId.contains("%2E") ||
+                publicId.contains("/../") ||
+                publicId.contains("\\..\\")) {
+            return false;
+        }
+
+        // Formato válido: letras, números, underline, hífen, barra
+        return publicId.matches("^[a-zA-Z0-9][a-zA-Z0-9_/\\-]*$");
+    }
 
     @GetMapping("/{publicId}")
     public ResponseEntity<byte[]> proxyImagem(
             @PathVariable String publicId,
             HttpServletRequest request) {
 
-        String userId = SecurityUtils.getUserIdOrThrow(request);
-
-        // Validação do publicId
-        if (publicId == null || !publicId.matches(PUBLIC_ID_REGEX)) {
-            auditLogService.logSecurityViolation(userId,
-                    "Tentativa de acesso com publicId inválido: " + publicId);
-            return ResponseEntity.badRequest().build();
-        }
-
-        // ✅ CORRIGIDO: buscar imagem uma única vez e reutilizar para verificação de acesso
-        //    e detecção de MIME — antes buscava duas vezes (em temAcessoAImagem e depois
-        //    em detectMimeType por extensão do nome, que pode não existir).
-        Imagem imagem = buscarImagemAcessivel(userId, publicId);
-        if (imagem == null) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
-
-        // ✅ CORRIGIDO: MIME lido do campo salvo no banco (model Imagem.mimeType)
-        //    em vez de inferir pela extensão do publicId, que frequentemente não tem extensão.
-        String mimeType = imagem.getMimeType();
-        if (mimeType == null || !MIME_ACEITOS.contains(mimeType)) {
-            log.warn("[Proxy] MIME type inválido ou ausente para publicId={}: {}", publicId, mimeType);
-            return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).build();
-        }
-
         try {
+            String userId = SecurityUtils.getUserIdOrThrow(request);
+
+            // ✅ CORREÇÃO 1: Validar path traversal (retorna 400 em vez de 500)
+            if (!isValidPublicId(publicId)) {
+                log.warn("[SECURITY] Path traversal attempt: {} from user: {}", publicId, userId);
+                auditLogService.logSecurityViolation(userId, "Path traversal attempt: " + publicId);
+                return ResponseEntity.badRequest().build();  // 400 Bad Request
+            }
+
+            // ✅ CORREÇÃO 2: Buscar imagem
+            Imagem imagem;
+            try {
+                imagem = imagemService.findByPublicId(publicId);
+            } catch (IllegalArgumentException e) {
+                log.warn("Imagem não encontrada: {} from user: {}", publicId, userId);
+                auditLogService.logSecurityViolation(userId, "Imagem não encontrada: " + publicId);
+                return ResponseEntity.notFound().build();  // 404 Not Found
+            }
+
+            // Verificar se imagem está ativa
+            if (!imagem.isAtiva()) {
+                log.warn("Imagem inativa: {} from user: {}", publicId, userId);
+                return ResponseEntity.status(HttpStatus.GONE).build();  // 410 Gone
+            }
+
+            // ✅ CORREÇÃO 3: Verificar acesso
+            Pessoa solicitante = pessoaService.findByUsuarioId(userId);
+            if (solicitante == null) {
+                log.warn("Solicitante não encontrado para userId: {}", userId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+
+            Pessoa donoImagem = imagem.getPessoa();
+            if (donoImagem == null) {
+                log.warn("Dono da imagem não encontrado para publicId: {}", publicId);
+                return ResponseEntity.notFound().build();
+            }
+
+            // ✅ CORREÇÃO 4: Dono da imagem tem acesso direto (IMPORTANTE!)
+            boolean isPropria = solicitante.getId().equals(donoImagem.getId());
+            boolean hasMatch = matchService.existeMatchAtivo(solicitante.getId(), donoImagem.getId());
+
+            if (!isPropria && !hasMatch) {
+                log.warn("[SECURITY] Acesso não autorizado à imagem: {} por usuário: {}", publicId, userId);
+                auditLogService.logSecurityViolation(userId,
+                        "Acesso não autorizado à imagem: " + publicId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();  // 403 Forbidden
+            }
+
+            log.info("✅ Acesso permitido à imagem: {} por usuário: {} (propria: {})",
+                    publicId, userId, isPropria);
+
+            // ✅ CORREÇÃO 5: Obter MIME type
+            String mimeType = imagem.getMimeType();
+            if (mimeType == null || !MIME_ACEITOS.contains(mimeType)) {
+                mimeType = "image/jpeg"; // fallback seguro
+            }
+
+            // ✅ CORREÇÃO 6: Baixar imagem do Cloudinary
             String imageUrl = cloudinary.url()
                     .secure(true)
                     .generate(publicId);
 
             if (!imageUrl.startsWith(CLOUDINARY_URL_PREFIX)) {
-                log.warn("[Security] URL gerada fora do domínio permitido para publicId: {}", publicId);
+                log.error("URL gerada fora do domínio permitido: {}", imageUrl);
                 return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
             }
 
             byte[] imageBytes = downloadImage(imageUrl);
             if (imageBytes == null || imageBytes.length == 0) {
+                log.error("Falha ao baixar imagem: {}", imageUrl);
                 return ResponseEntity.notFound().build();
             }
 
+            // Registrar acesso
             auditLogService.logImageAccess(userId, publicId, "PROXY_ACCESS");
 
             HttpHeaders headers = new HttpHeaders();
@@ -92,56 +150,28 @@ public class ImagemProxyController {
             return new ResponseEntity<>(imageBytes, headers, HttpStatus.OK);
 
         } catch (Exception e) {
-            log.error("[Proxy] Erro ao buscar imagem {}: {}", publicId, e.getMessage());
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+            log.error("Erro no proxy de imagem: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
-    }
-
-    /**
-     * ✅ CORRIGIDO: retorna a Imagem em vez de boolean, evitando busca dupla no banco.
-     *    Retorna null se não tiver acesso (imagem inexistente, inativa, solicitante
-     *    não encontrado, sem match ou não é o dono).
-     */
-    private Imagem buscarImagemAcessivel(String userId, String publicId) {
-        Imagem imagem;
-        try {
-            imagem = imagemService.findByPublicId(publicId);
-        } catch (IllegalArgumentException e) {
-            auditLogService.logSecurityViolation(userId,
-                    "Tentativa de acesso a imagem inexistente: " + publicId);
-            return null;
-        }
-
-        if (!imagem.isAtiva()) return null;
-
-        Pessoa solicitante = pessoaService.findByUsuarioId(userId);
-        if (solicitante == null) return null;
-
-        Pessoa donoImagem = imagem.getPessoa();
-        if (donoImagem == null) return null;
-
-        // Dono da imagem tem acesso direto
-        if (solicitante.getId().equals(donoImagem.getId())) return imagem;
-
-        // Verificar match ativo entre solicitante e dono
-        if (matchService.existeMatchAtivo(solicitante.getId(), donoImagem.getId())) return imagem;
-
-        auditLogService.logSecurityViolation(userId,
-                "Tentativa de acesso não autorizado à imagem: " + publicId);
-        return null;
     }
 
     private byte[] downloadImage(String imageUrl) throws Exception {
-        URL url = new URL(imageUrl);
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        HttpURLConnection connection = (HttpURLConnection) new URL(imageUrl).openConnection();
         connection.setRequestMethod("GET");
         connection.setConnectTimeout(5000);
         connection.setReadTimeout(5000);
+        connection.setRequestProperty("User-Agent", "TinderUfs/1.0");
+
+        int responseCode = connection.getResponseCode();
+        if (responseCode != HttpURLConnection.HTTP_OK) {
+            log.error("Erro ao baixar imagem. HTTP Status: {}", responseCode);
+            return null;
+        }
 
         try (InputStream inputStream = connection.getInputStream();
              ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
 
-            byte[] buffer = new byte[4096];
+            byte[] buffer = new byte[8192];
             int bytesRead;
             while ((bytesRead = inputStream.read(buffer)) != -1) {
                 outputStream.write(buffer, 0, bytesRead);

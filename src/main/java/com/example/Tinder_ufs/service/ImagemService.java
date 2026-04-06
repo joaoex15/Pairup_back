@@ -55,7 +55,7 @@ public class ImagemService {
             throw new IOException("Erro ao fazer upload da imagem: " + e.getMessage(), e);
         }
 
-        // 4. Extrair dados - ✅ CORRIGIDO: tratar Integer e Long
+        // 4. Extrair dados - tratar Integer e Long
         String publicId = (String) uploadResult.get("public_id");
         String url = (String) uploadResult.get("secure_url");
 
@@ -127,23 +127,42 @@ public class ImagemService {
         Imagem imagem = imagemRepository.findById(imagemId)
                 .orElseThrow(() -> new IllegalArgumentException("Imagem não encontrada: " + imagemId));
 
+        // Verificar propriedade
         if (!imagem.getPessoa().getId().equals(pessoaId)) {
             throw new SecurityException("Acesso negado: você não é o proprietário desta imagem");
         }
 
+        // Verificar se é a última imagem ativa
         long countAtivas = imagemRepository.countByPessoaIdAndAtivaTrue(pessoaId);
         if (countAtivas <= 1 && imagem.isAtiva()) {
             throw new IllegalStateException("Não é possível deletar a última imagem do perfil");
         }
 
+        // ✅ CORREÇÃO: Deletar do Cloudinary com tratamento de erro
         try {
-            cloudinary.uploader().destroy(imagem.getPublicId(), ObjectUtils.emptyMap());
+            Map<?, ?> result = cloudinary.uploader().destroy(imagem.getPublicId(), ObjectUtils.emptyMap());
+            String resultStatus = (String) result.get("result");
+            log.info("Resultado da deleção no Cloudinary: {}", resultStatus);
+
+            if ("ok".equals(resultStatus) || "not found".equals(resultStatus)) {
+                // Soft delete no banco
+                imagem.setAtiva(false);
+                imagemRepository.save(imagem);
+                log.info("Imagem {} deletada com sucesso do Cloudinary e banco", imagemId);
+            } else {
+                log.warn("Cloudinary não conseguiu deletar: {}", resultStatus);
+                // Mesmo assim, marcar como inativa no banco
+                imagem.setAtiva(false);
+                imagemRepository.save(imagem);
+                log.info("Imagem {} marcada como inativa no banco (Cloudinary: {})", imagemId, resultStatus);
+            }
         } catch (Exception e) {
             log.error("Erro ao deletar imagem do Cloudinary: {}", e.getMessage());
+            // ✅ CORREÇÃO: Mesmo com erro no Cloudinary, marcar como inativa no banco
+            imagem.setAtiva(false);
+            imagemRepository.save(imagem);
+            log.info("Imagem {} marcada como inativa no banco (Cloudinary erro)", imagemId);
         }
-
-        imagem.setAtiva(false);
-        imagemRepository.save(imagem);
     }
 
     @Transactional(readOnly = true)
@@ -153,7 +172,38 @@ public class ImagemService {
     }
 
     @Transactional(readOnly = true)
+    public Imagem findById(String id) {
+        return imagemRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Imagem não encontrada: " + id));
+    }
+
+    @Transactional(readOnly = true)
     public List<Imagem> listarImagensAtivasPorUsuario(String pessoaId) {
         return imagemRepository.findByPessoaIdAndAtivaTrue(pessoaId);
+    }
+
+    @Transactional
+    public Imagem definirFotoPerfil(String imagemId, String pessoaId) {
+        log.info("Definindo imagem {} como foto de perfil para pessoa: {}", imagemId, pessoaId);
+
+        Imagem imagem = findById(imagemId);
+
+        if (!imagem.getPessoa().getId().equals(pessoaId)) {
+            throw new SecurityException("Acesso negado: você não é o proprietário desta imagem");
+        }
+
+        // Remover flag de perfil de todas as outras imagens
+        imagemRepository.findByPessoaIdAndPerfilTrue(pessoaId)
+                .ifPresent(perfilAtual -> {
+                    perfilAtual.setPerfil(false);
+                    imagemRepository.save(perfilAtual);
+                });
+
+        // Definir nova foto de perfil
+        imagem.setPerfil(true);
+        imagemRepository.save(imagem);
+
+        log.info("Foto de perfil atualizada para imagem: {}", imagemId);
+        return imagem;
     }
 }

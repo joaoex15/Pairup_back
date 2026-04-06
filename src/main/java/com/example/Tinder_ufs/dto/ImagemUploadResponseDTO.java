@@ -23,7 +23,6 @@ public class ImagemUploadResponseDTO {
         this.sucesso = true;
     }
 
-    // Método factory para converter de Imagem model
     public static ImagemUploadResponseDTO fromImagem(Imagem imagem, String nomeOriginal) {
         ImagemUploadResponseDTO dto = new ImagemUploadResponseDTO();
         dto.setId(imagem.getId());
@@ -39,6 +38,13 @@ public class ImagemUploadResponseDTO {
     public static ImagemUploadResponseDTO error(String mensagem) {
         ImagemUploadResponseDTO dto = new ImagemUploadResponseDTO();
         dto.setSucesso(false);
+        dto.setMensagem(mensagem);
+        return dto;
+    }
+
+    public static ImagemUploadResponseDTO success(String mensagem) {
+        ImagemUploadResponseDTO dto = new ImagemUploadResponseDTO();
+        dto.setSucesso(true);
         dto.setMensagem(mensagem);
         return dto;
     }

@@ -16,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -25,7 +26,7 @@ import java.util.stream.Collectors;
 public class ImagemController {
 
     private final ImagemService imagemService;
-    private final PessoaService pessoaService;  // ✅ Adicionar PessoaService
+    private final PessoaService pessoaService;
 
     @PostMapping("/upload")
     public ResponseEntity<ImagemUploadResponseDTO> uploadImagem(
@@ -35,18 +36,17 @@ public class ImagemController {
         try {
             String userId = SecurityUtils.getUserIdOrThrow(request);
 
-            // ✅ CORREÇÃO: Buscar a Pessoa associada ao User autenticado
             Pessoa pessoa = pessoaService.findByUsuarioId(userId);
             if (pessoa == null) {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                         .body(ImagemUploadResponseDTO.error("Perfil não encontrado. Complete seu cadastro primeiro."));
             }
 
-            String pessoaId = pessoa.getId();  // ← Agora sim o ID correto da Pessoa
+            String pessoaId = pessoa.getId();
 
             Imagem imagem = imagemService.salvarImagem(
                     uploadDTO.getFile(),
-                    pessoaId,  // ← Passando pessoaId correto
+                    pessoaId,
                     uploadDTO.isPerfil()
             );
 
@@ -64,10 +64,6 @@ public class ImagemController {
             log.error("Erro de segurança: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(ImagemUploadResponseDTO.error(e.getMessage()));
-        } catch (IllegalStateException e) {
-            log.error("Erro de estado: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(ImagemUploadResponseDTO.error(e.getMessage()));
         } catch (Exception e) {
             log.error("Erro interno: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -83,7 +79,6 @@ public class ImagemController {
         try {
             String userId = SecurityUtils.getUserIdOrThrow(request);
 
-            // ✅ CORREÇÃO: Buscar a Pessoa associada ao User autenticado
             Pessoa pessoa = pessoaService.findByUsuarioId(userId);
             if (pessoa == null) {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST)
@@ -94,11 +89,7 @@ public class ImagemController {
 
             imagemService.deletarImagem(imagemId, pessoaId);
 
-            ImagemUploadResponseDTO response = new ImagemUploadResponseDTO();
-            response.setSucesso(true);
-            response.setMensagem("Imagem deletada com sucesso");
-
-            return ResponseEntity.ok(response);
+            return ResponseEntity.ok(ImagemUploadResponseDTO.success("Imagem deletada com sucesso"));
 
         } catch (IllegalArgumentException e) {
             log.warn("Imagem não encontrada: {}", e.getMessage());
@@ -115,7 +106,7 @@ public class ImagemController {
         } catch (Exception e) {
             log.error("Erro interno: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(ImagemUploadResponseDTO.error("Erro ao deletar imagem"));
+                    .body(ImagemUploadResponseDTO.error("Erro ao deletar imagem: " + e.getMessage()));
         }
     }
 
@@ -124,10 +115,9 @@ public class ImagemController {
         try {
             String userId = SecurityUtils.getUserIdOrThrow(request);
 
-            // ✅ CORREÇÃO: Buscar a Pessoa associada ao User autenticado
             Pessoa pessoa = pessoaService.findByUsuarioId(userId);
             if (pessoa == null) {
-                return ResponseEntity.ok(List.of());  // Retorna lista vazia se não tem perfil
+                return ResponseEntity.ok(List.of());
             }
 
             String pessoaId = pessoa.getId();
