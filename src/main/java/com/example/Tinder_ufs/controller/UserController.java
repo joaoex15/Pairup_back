@@ -16,8 +16,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Map;
 
@@ -32,7 +32,9 @@ public class UserController {
     private final UserService userService;
     private final JwtService jwtService;
 
-    /** Retorna os dados do usuário autenticado (sem senha). */
+    /**
+     * Retorna os dados do usuário autenticado (sem senha).
+     */
     @GetMapping("/me")
     @Operation(summary = "Obter usuário logado")
     @ApiResponses({
@@ -52,10 +54,9 @@ public class UserController {
     /**
      * Autentica um usuário e retorna o JWT.
      *
-     * ✅ Captura apenas InvalidCredentialsException para 401.
-     *    Outros erros (ex: banco fora) propagam para o GlobalExceptionHandler
-     *    que retorna 500 sem expor detalhes internos.
-     * ✅ Log de tentativa de login — útil para detectar força bruta no SIEM.
+     * ✅ CORRIGIDO: captura BadCredentialsException (lançada pelo UserService via Spring Security)
+     *    em vez de ResponseStatusException — evitava que o catch nunca fosse acionado,
+     *    fazendo login inválido retornar 500 em vez de 401.
      *
      * TODO: adicionar rate limiting por IP (Bucket4j / Resilience4j).
      *       Após 5 falhas consecutivas, bloquear por 15 min ou exigir CAPTCHA.
@@ -79,15 +80,14 @@ public class UserController {
                     "email", user.getEmail()
             ));
 
-        } catch (ResponseStatusException e) {
-            // ✅ Exceção de credenciais inválidas lançada explicitamente pelo UserService
+        } catch (BadCredentialsException e) {
+            // ✅ CORRIGIDO: era ResponseStatusException — nunca batia aqui, retornava 500
             log.warn("[AUDIT] Tentativa de login falhou para email={}", loginRequest.getEmail());
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("erro", "Credenciais inválidas."));
-
-            // ✅ Qualquer outro erro (banco, etc.) NÃO é capturado aqui.
-            //    Ele sobe para o GlobalExceptionHandler que retorna 500 sem stack trace.
         }
+        // Qualquer outro erro (banco, etc.) NÃO é capturado aqui.
+        // Ele sobe para o GlobalExceptionHandler que retorna 500 sem stack trace.
     }
 
     /**
@@ -129,6 +129,7 @@ public class UserController {
         String userId = SecurityUtils.getUserIdOrThrow(request);
 
         User updated = userService.updateUser(userId, user);
+        if (updated == null) return ResponseEntity.notFound().build();
         updated.setPassword(null);
         return ResponseEntity.ok(updated);
     }

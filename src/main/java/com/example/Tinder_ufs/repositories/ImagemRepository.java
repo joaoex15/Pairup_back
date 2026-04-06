@@ -4,27 +4,27 @@ import com.example.Tinder_ufs.models.Imagem;
 import com.example.Tinder_ufs.models.Pessoa;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.data.mongodb.repository.Query;
-import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
 
-@Repository
 public interface ImagemRepository extends MongoRepository<Imagem, String> {
-
-    Optional<Imagem> findByPublicId(String publicId);
-
-    Optional<Imagem> findByPessoaAndPerfilTrue(Pessoa pessoa);
 
     List<Imagem> findByPessoaAndAtivaTrue(Pessoa pessoa);
 
-    @Query("{ 'pessoa': ?0, 'ativa': true }")
-    List<Imagem> findActiveImagesByPessoa(Pessoa pessoa);
+    Optional<Imagem> findByPessoaAndPerfilTrue(Pessoa pessoa);
+
+    Optional<Imagem> findByPublicId(String publicId);
 
     long countByPessoaAndAtivaTrue(Pessoa pessoa);
 
-    @Query("{ 'pessoa': ?0, 'perfil': true, 'ativa': true }")
-    Optional<Imagem> findActivePerfilByPessoa(Pessoa pessoa);
+    @Query("{ 'ativa': true, 'perfil': false, 'pessoa': ?0 }")
+    List<Imagem> findActiveImagesByPessoa(Pessoa pessoa);
 
-    void deleteByPublicId(String publicId);
+    /**
+     * ✅ NOVO: busca imagens de múltiplas pessoas em uma única query.
+     *    Necessário para evitar N+1 em getAllPerfisWithFilters do PessoaService.
+     */
+    @Query("{ 'pessoa.$id': { $in: ?0 }, 'ativa': true }")
+    List<Imagem> findByPessoaIdInAndAtivaTrue(List<String> pessoaIds);
 }

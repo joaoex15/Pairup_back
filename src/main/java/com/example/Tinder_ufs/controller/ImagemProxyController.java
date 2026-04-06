@@ -7,6 +7,7 @@ import com.example.Tinder_ufs.service.ImagemService;
 import com.example.Tinder_ufs.service.MatchService;
 import com.example.Tinder_ufs.service.PessoaService;
 import com.example.Tinder_ufs.service.AuditLogService;
+import com.example.Tinder_ufs.models.Pessoa;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,14 +47,25 @@ public class ImagemProxyController {
 
         // Validação do publicId
         if (publicId == null || !publicId.matches(PUBLIC_ID_REGEX)) {
-            auditLogService.logSecurityViolation(userId, "Tentativa de acesso com publicId inválido: " + publicId);
+            auditLogService.logSecurityViolation(userId,
+                    "Tentativa de acesso com publicId inválido: " + publicId);
             return ResponseEntity.badRequest().build();
         }
 
-        // Verificação de acesso
-        if (!temAcessoAImagem(userId, publicId)) {
-            auditLogService.logSecurityViolation(userId, "Tentativa de acesso não autorizado à imagem: " + publicId);
+        // ✅ CORRIGIDO: buscar imagem uma única vez e reutilizar para verificação de acesso
+        //    e detecção de MIME — antes buscava duas vezes (em temAcessoAImagem e depois
+        //    em detectMimeType por extensão do nome, que pode não existir).
+        Imagem imagem = buscarImagemAcessivel(userId, publicId);
+        if (imagem == null) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
+        // ✅ CORRIGIDO: MIME lido do campo salvo no banco (model Imagem.mimeType)
+        //    em vez de inferir pela extensão do publicId, que frequentemente não tem extensão.
+        String mimeType = imagem.getMimeType();
+        if (mimeType == null || !MIME_ACEITOS.contains(mimeType)) {
+            log.warn("[Proxy] MIME type inválido ou ausente para publicId={}: {}", publicId, mimeType);
+            return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).build();
         }
 
         try {
@@ -71,12 +83,6 @@ public class ImagemProxyController {
                 return ResponseEntity.notFound().build();
             }
 
-            String mimeType = detectMimeType(publicId);
-            if (!MIME_ACEITOS.contains(mimeType)) {
-                return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).build();
-            }
-
-            // Log de acesso bem-sucedido
             auditLogService.logImageAccess(userId, publicId, "PROXY_ACCESS");
 
             HttpHeaders headers = new HttpHeaders();
@@ -91,21 +97,38 @@ public class ImagemProxyController {
         }
     }
 
-    private boolean temAcessoAImagem(String userId, String publicId) {
-        Imagem imagem = imagemService.findByPublicId(publicId);
-        if (imagem == null || !imagem.isAtiva()) return false;
+    /**
+     * ✅ CORRIGIDO: retorna a Imagem em vez de boolean, evitando busca dupla no banco.
+     *    Retorna null se não tiver acesso (imagem inexistente, inativa, solicitante
+     *    não encontrado, sem match ou não é o dono).
+     */
+    private Imagem buscarImagemAcessivel(String userId, String publicId) {
+        Imagem imagem;
+        try {
+            imagem = imagemService.findByPublicId(publicId);
+        } catch (IllegalArgumentException e) {
+            auditLogService.logSecurityViolation(userId,
+                    "Tentativa de acesso a imagem inexistente: " + publicId);
+            return null;
+        }
 
-        var solicitante = pessoaService.findByUsuarioId(userId);
-        if (solicitante == null) return false;
+        if (!imagem.isAtiva()) return null;
 
-        var donoImagem = imagem.getPessoa();
-        if (donoImagem == null) return false;
+        Pessoa solicitante = pessoaService.findByUsuarioId(userId);
+        if (solicitante == null) return null;
 
-        // Dono da imagem tem acesso
-        if (solicitante.getId().equals(donoImagem.getId())) return true;
+        Pessoa donoImagem = imagem.getPessoa();
+        if (donoImagem == null) return null;
 
-        // Verificar match ativo
-        return matchService.existeMatchAtivo(solicitante.getId(), donoImagem.getId());
+        // Dono da imagem tem acesso direto
+        if (solicitante.getId().equals(donoImagem.getId())) return imagem;
+
+        // Verificar match ativo entre solicitante e dono
+        if (matchService.existeMatchAtivo(solicitante.getId(), donoImagem.getId())) return imagem;
+
+        auditLogService.logSecurityViolation(userId,
+                "Tentativa de acesso não autorizado à imagem: " + publicId);
+        return null;
     }
 
     private byte[] downloadImage(String imageUrl) throws Exception {
@@ -125,13 +148,5 @@ public class ImagemProxyController {
             }
             return outputStream.toByteArray();
         }
-    }
-
-    private String detectMimeType(String publicId) {
-        String lower = publicId.toLowerCase();
-        if (lower.endsWith(".png")) return "image/png";
-        if (lower.endsWith(".gif")) return "image/gif";
-        if (lower.endsWith(".webp")) return "image/webp";
-        return "image/jpeg";
     }
 }

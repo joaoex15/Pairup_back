@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -36,18 +37,14 @@ public class PessoaService {
     @Transactional(readOnly = true)
     public PessoaCompletaDTO getPessoaCompletaById(String id) {
         Pessoa pessoa = findById(id);
-        if (pessoa == null) {
-            return null;
-        }
+        if (pessoa == null) return null;
         return convertToCompletaDTO(pessoa);
     }
 
     @Transactional(readOnly = true)
     public PessoaCompletaDTO getPessoaCompletaByUsuarioId(String usuarioId) {
         Pessoa pessoa = findByUsuarioId(usuarioId);
-        if (pessoa == null) {
-            return null;
-        }
+        if (pessoa == null) return null;
         return convertToCompletaDTO(pessoa);
     }
 
@@ -56,14 +53,11 @@ public class PessoaService {
     @Transactional(readOnly = true)
     public PessoaPerfilDTO getPerfilComImagensById(String id) {
         Pessoa pessoa = findById(id);
-        if (pessoa == null) {
-            return null;
-        }
-        PessoaPerfilDTO dto = convertToPerfilDTO(pessoa);
+        if (pessoa == null) return null;
 
+        PessoaPerfilDTO dto = convertToPerfilDTO(pessoa);
         List<Imagem> imagens = imagemRepository.findByPessoaAndAtivaTrue(pessoa);
         dto.setImagens(imagens);
-
         imagens.stream()
                 .filter(Imagem::isPerfil)
                 .findFirst()
@@ -75,64 +69,66 @@ public class PessoaService {
     @Transactional(readOnly = true)
     public List<Imagem> getImagensByPessoaId(String pessoaId) {
         Pessoa pessoa = findById(pessoaId);
-        if (pessoa == null) {
-            return List.of();
-        }
+        if (pessoa == null) return List.of();
         return imagemRepository.findByPessoaAndAtivaTrue(pessoa);
     }
 
     @Transactional(readOnly = true)
     public String getFotoPerfilUrl(String pessoaId) {
         Pessoa pessoa = findById(pessoaId);
-        if (pessoa == null) {
-            return null;
-        }
+        if (pessoa == null) return null;
         return imagemRepository.findByPessoaAndPerfilTrue(pessoa)
                 .map(Imagem::getUrl)
                 .orElse(null);
     }
 
-    // ==================== FILTROS ====================
+    // ==================== FILTROS (CORRIGIDO: sem N+1) ====================
 
+    /**
+     * ✅ CORRIGIDO: filtros delegados ao MongoDB (sem carregar tudo em memória).
+     *    Imagens buscadas em uma única query por lote de IDs (sem N+1).
+     */
     @Transactional(readOnly = true)
-    public Page<PessoaPerfilDTO> getAllPerfisWithFilters(Interesse interesse, Genero genero, Pageable pageable) {
-        List<Pessoa> pessoas = pessoaRepository.findByAtivoTrue();
+    public Page<PessoaPerfilDTO> getAllPerfisWithFilters(
+            Interesse interesse, Genero genero, Pageable pageable) {
 
-        List<PessoaPerfilDTO> filtered = pessoas.stream()
-                .filter(p -> {
-                    if (interesse == null) return true;
-                    if (interesse == Interesse.TODOS) {
-                        return p.getInteresse() != Interesse.NAO_DEFINIDO;
-                    }
-                    return p.getInteresse() == interesse;
-                })
-                .filter(p -> {
-                    if (genero == null) return true;
-                    return p.getGenero() == genero;
-                })
-                .map(pessoa -> {
-                    PessoaPerfilDTO dto = convertToPerfilDTO(pessoa);
-
-                    List<Imagem> imagens = imagemRepository.findByPessoaAndAtivaTrue(pessoa);
-                    dto.setImagens(imagens);
-
-                    imagens.stream()
-                            .filter(Imagem::isPerfil)
-                            .findFirst()
-                            .ifPresent(perfil -> dto.setFotoPerfilUrl(perfil.getUrl()));
-
-                    return dto;
-                })
-                .collect(Collectors.toList());
-
-        int start = (int) pageable.getOffset();
-        int end = Math.min((start + pageable.getPageSize()), filtered.size());
-
-        if (start > filtered.size()) {
-            return Page.empty(pageable);
+        // 1. Delegar filtros e paginação ao banco
+        Page<Pessoa> page;
+        if (interesse != null && genero != null) {
+            page = pessoaRepository.findByAtivoTrueAndInteresseAndGenero(interesse, genero, pageable);
+        } else if (interesse != null) {
+            page = pessoaRepository.findByAtivoTrueAndInteresse(interesse, pageable);
+        } else if (genero != null) {
+            page = pessoaRepository.findByAtivoTrueAndGenero(genero, pageable);
+        } else {
+            page = pessoaRepository.findByAtivoTrue(pageable);
         }
 
-        return new PageImpl<>(filtered.subList(start, end), pageable, filtered.size());
+        if (page.isEmpty()) return page.map(p -> null); // retorna Page vazia tipada
+
+        // 2. Buscar TODAS as imagens da página em uma única query (evita N+1)
+        List<String> pessoaIds = page.getContent().stream()
+                .map(Pessoa::getId)
+                .collect(Collectors.toList());
+
+        List<Imagem> todasImagens = imagemRepository.findByPessoaIdInAndAtivaTrue(pessoaIds);
+
+        Map<String, List<Imagem>> imagensPorPessoa = todasImagens.stream()
+                .collect(Collectors.groupingBy(img -> img.getPessoa().getId()));
+
+        // 3. Montar DTOs sem novas queries
+        List<PessoaPerfilDTO> dtos = page.getContent().stream().map(pessoa -> {
+            PessoaPerfilDTO dto = convertToPerfilDTO(pessoa);
+            List<Imagem> imagens = imagensPorPessoa.getOrDefault(pessoa.getId(), List.of());
+            dto.setImagens(imagens);
+            imagens.stream()
+                    .filter(Imagem::isPerfil)
+                    .findFirst()
+                    .ifPresent(p -> dto.setFotoPerfilUrl(p.getUrl()));
+            return dto;
+        }).collect(Collectors.toList());
+
+        return new PageImpl<>(dtos, pageable, page.getTotalElements());
     }
 
     // ==================== CRUD COM VALIDAÇÃO ====================
@@ -187,9 +183,7 @@ public class PessoaService {
     @Transactional
     public Pessoa marcarCienciaResponsabilidade(String id) {
         Pessoa pessoa = findById(id);
-        if (pessoa == null) {
-            throw new RuntimeException("Pessoa não encontrada");
-        }
+        if (pessoa == null) throw new RuntimeException("Pessoa não encontrada");
         pessoa.setCienciaResponsabilidade(true);
         log.info("Usuário {} aceitou os termos de responsabilidade", pessoa.getEmail());
         return pessoaRepository.save(pessoa);
@@ -199,17 +193,13 @@ public class PessoaService {
 
     public PessoaPerfilDTO getPerfilById(String id) {
         Pessoa pessoa = findById(id);
-        if (pessoa == null) {
-            return null;
-        }
+        if (pessoa == null) return null;
         return convertToPerfilDTO(pessoa);
     }
 
     public PessoaRedesSociaisDTO getRedesSociaisById(String id) {
         Pessoa pessoa = findById(id);
-        if (pessoa == null) {
-            return null;
-        }
+        if (pessoa == null) return null;
         return convertToRedesSociaisDTO(pessoa);
     }
 
@@ -229,11 +219,8 @@ public class PessoaService {
         }
     }
 
-    // ==================== CONVERSORES CORRIGIDOS ====================
+    // ==================== CONVERSORES ====================
 
-    /**
-     * Converte para DTO COMPLETO - ✅ CORRIGIDO
-     */
     private PessoaCompletaDTO convertToCompletaDTO(Pessoa pessoa) {
         List<Imagem> imagens = imagemRepository.findByPessoaAndAtivaTrue(pessoa);
 
@@ -244,7 +231,6 @@ public class PessoaService {
                 .orElse(null);
 
         PessoaCompletaDTO dto = new PessoaCompletaDTO();
-
         dto.setId(pessoa.getId());
         dto.setNome(pessoa.getNome());
         dto.setCurso(pessoa.getCurso());
@@ -254,15 +240,12 @@ public class PessoaService {
         dto.setInteresse(pessoa.getInteresse());
         dto.setDescricao(pessoa.getDescricao());
         dto.setCienciaResponsabilidade(pessoa.isCienciaResponsabilidade());
-
         dto.setInstagram(pessoa.getInstagram());
         dto.setWhatsapp(pessoa.getWhatsapp());
         dto.setTelegram(pessoa.getTelegram());
-
         dto.setImagens(imagens);
         dto.setFotoPerfilUrl(fotoPerfilUrl);
 
-        // ✅ CORREÇÃO: converte List<Tag> para List<String>
         if (pessoa.getTags() != null) {
             List<String> tagNomes = pessoa.getTags().stream()
                     .map(Tag::getNome)
@@ -275,9 +258,6 @@ public class PessoaService {
         return dto;
     }
 
-    /**
-     * Converte para PerfilDTO - ✅ CORRIGIDO
-     */
     private PessoaPerfilDTO convertToPerfilDTO(Pessoa pessoa) {
         PessoaPerfilDTO dto = new PessoaPerfilDTO();
         dto.setId(pessoa.getId());
@@ -289,7 +269,6 @@ public class PessoaService {
         dto.setInteresse(pessoa.getInteresse());
         dto.setDescricao(pessoa.getDescricao());
 
-        // ✅ CORREÇÃO: converte List<Tag> para List<String>
         if (pessoa.getTags() != null) {
             List<String> tagNomes = pessoa.getTags().stream()
                     .map(Tag::getNome)

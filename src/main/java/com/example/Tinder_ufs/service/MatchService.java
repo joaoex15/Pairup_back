@@ -13,8 +13,15 @@ public class MatchService {
 
     private final MatchRepository matchRepository;
 
+    /**
+     * ✅ CORRIGIDO: query delegada ao repositório com @Query explícito.
+     *    O método anterior findByPessoaId1OrPessoaId2AndAtivoTrue tinha precedência
+     *    ambígua — Spring Data interpretava como: pessoaId1 OR (pessoaId2 AND ativo),
+     *    retornando matches inativos do pessoaId1. Agora usa findMeusMatchesAtivos
+     *    com @Query: { $and: [ {ativo:true}, { $or: [{pessoaId1}, {pessoaId2}] } ] }
+     */
     public Page<Match> listarMeusMatches(String pessoaId, Pageable pageable) {
-        return matchRepository.findByPessoaId1OrPessoaId2AndAtivoTrue(pessoaId, pessoaId, pageable);
+        return matchRepository.findMeusMatchesAtivos(pessoaId, pessoaId, pageable);
     }
 
     public Match findById(String id) {

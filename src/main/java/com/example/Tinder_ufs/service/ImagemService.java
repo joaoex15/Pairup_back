@@ -6,7 +6,6 @@ import com.example.Tinder_ufs.models.Imagem;
 import com.example.Tinder_ufs.models.Pessoa;
 import com.example.Tinder_ufs.repositories.ImagemRepository;
 import com.example.Tinder_ufs.repositories.PessoaRepository;
-import com.example.Tinder_ufs.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,14 +13,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import javax.crypto.Cipher;
-import javax.crypto.KeyGenerator;
-import javax.crypto.SecretKey;
-import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
 import java.security.SecureRandom;
-import java.time.LocalDateTime;
-import java.util.*;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 @Slf4j
 @Service
@@ -48,7 +46,9 @@ public class ImagemService {
     @Transactional
     public Imagem salvarImagem(MultipartFile file, String pessoaId, boolean isPerfil) {
         // 1. Validações de segurança
-        validateImageUpload(file, pessoaId, isPerfil);
+        // ✅ CORRIGIDO: validação centralizada em validateImageUpload — removida verificação
+        //    duplicada de tamanho que existia logo abaixo dentro do try.
+        validateImageUpload(file, pessoaId);
 
         // 2. Buscar pessoa
         Pessoa pessoa = pessoaRepository.findById(pessoaId)
@@ -79,19 +79,14 @@ public class ImagemService {
         String fileName = String.format("img_%s_%s", timestamp, randomHash);
         String fullPublicId = String.format("%s/%s", userFolder, fileName);
 
+        // 7. Validar MIME type
+        String mimeType = file.getContentType();
+        if (!ALLOWED_MIME_TYPES.contains(mimeType)) {
+            throw new IllegalArgumentException("Tipo de arquivo não permitido");
+        }
+
         try {
-            // 7. Validar tamanho do arquivo
-            if (file.getSize() > maxFileSizeMB * 1024 * 1024) {
-                throw new IllegalArgumentException("Arquivo excede " + maxFileSizeMB + "MB");
-            }
-
-            // 8. Validar MIME type
-            String mimeType = file.getContentType();
-            if (!ALLOWED_MIME_TYPES.contains(mimeType)) {
-                throw new IllegalArgumentException("Tipo de arquivo não permitido");
-            }
-
-            // 9. Upload para Cloudinary com transformações seguras
+            // 8. Upload para Cloudinary com transformações seguras
             Map<String, Object> uploadOptions = ObjectUtils.asMap(
                     "public_id", fullPublicId,
                     "folder", userFolder,
@@ -115,7 +110,7 @@ public class ImagemService {
             String publicId = uploadResult.get("public_id").toString();
             long tamanhoBytes = (long) uploadResult.getOrDefault("bytes", 0L);
 
-            // 10. Salvar no MongoDB
+            // 9. Salvar no MongoDB
             Imagem imagem = new Imagem(
                     pessoa, secureUrl, publicId, userFolder,
                     isPerfil, tamanhoBytes, mimeType
@@ -123,7 +118,7 @@ public class ImagemService {
 
             Imagem savedImagem = imagemRepository.save(imagem);
 
-            // 11. Log de auditoria
+            // 10. Log de auditoria
             auditLogService.logImageUpload(pessoa.getId(), savedImagem.getId(), isPerfil);
 
             log.info("Imagem salva com sucesso - ID: {}, Usuário: {}, Perfil: {}",
@@ -155,36 +150,41 @@ public class ImagemService {
             throw new IllegalStateException("Não é possível deletar a última foto do perfil");
         }
 
-        try {
-            // 4. Soft delete primeiro (marca como inativa)
-            imagem.setAtiva(false);
+        // 4. Soft delete (marca como inativa)
+        imagem.setAtiva(false);
 
-            // 5. Se era foto de perfil, promover outra
-            if (imagem.isPerfil()) {
-                Optional<Imagem> outraImagem = imagemRepository.findActiveImagesByPessoa(imagem.getPessoa())
-                        .stream()
-                        .filter(img -> !img.getId().equals(imagemId))
-                        .findFirst();
+        // 5. Se era foto de perfil, promover outra
+        if (imagem.isPerfil()) {
+            Optional<Imagem> outraImagem = imagemRepository.findActiveImagesByPessoa(imagem.getPessoa())
+                    .stream()
+                    .filter(img -> !img.getId().equals(imagemId))
+                    .findFirst();
 
-                outraImagem.ifPresent(outra -> {
-                    outra.setPerfil(true);
-                    imagemRepository.save(outra);
-                    log.info("Nova foto de perfil promovida: {}", outra.getId());
-                });
-            }
-
-            imagemRepository.save(imagem);
-
-            // 6. Deletar do Cloudinary (opcional - pode manter backup)
-            // cloudinary.uploader().destroy(imagem.getPublicId(), ObjectUtils.emptyMap());
-
-            auditLogService.logImageDeletion(pessoaId, imagemId);
-            log.info("Imagem desativada - ID: {}, Usuário: {}", imagemId, pessoaId);
-
-        } catch (Exception e) {
-            log.error("Erro ao deletar imagem: {}", e.getMessage());
-            throw new RuntimeException("Erro ao deletar imagem do Cloudinary: " + e.getMessage(), e);
+            outraImagem.ifPresent(outra -> {
+                outra.setPerfil(true);
+                imagemRepository.save(outra);
+                log.info("Nova foto de perfil promovida: {}", outra.getId());
+            });
         }
+
+        imagemRepository.save(imagem);
+
+        // 6. ✅ CORRIGIDO: deleção do Cloudinary ativada com tratamento de erro isolado.
+        //    Antes estava comentada — imagem sumia do banco mas permanecia no storage.
+        //    O erro no Cloudinary não cancela a operação principal (soft delete já feito).
+        try {
+            Map result = cloudinary.uploader().destroy(imagem.getPublicId(), ObjectUtils.emptyMap());
+            log.info("Imagem removida do Cloudinary - publicId={}, result={}",
+                    imagem.getPublicId(), result.get("result"));
+        } catch (IOException cloudinaryEx) {
+            // Registrar para revisão manual ou fila de retry — não reverter o soft delete
+            log.error("Falha ao remover imagem do Cloudinary (publicId={}): {}. " +
+                            "Imagem permanece no storage e deve ser removida manualmente.",
+                    imagem.getPublicId(), cloudinaryEx.getMessage());
+        }
+
+        auditLogService.logImageDeletion(pessoaId, imagemId);
+        log.info("Imagem desativada - ID: {}, Usuário: {}", imagemId, pessoaId);
     }
 
     public Imagem findByPublicId(String publicId) {
@@ -192,7 +192,11 @@ public class ImagemService {
                 .orElseThrow(() -> new IllegalArgumentException("Imagem não encontrada"));
     }
 
-    private void validateImageUpload(MultipartFile file, String pessoaId, boolean isPerfil) {
+    /**
+     * ✅ CORRIGIDO: removido parâmetro isPerfil desnecessário — não é usado na validação.
+     *    Removida verificação de tamanho duplicada que existia também dentro do salvarImagem.
+     */
+    private void validateImageUpload(MultipartFile file, String pessoaId) {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("Arquivo não pode ser vazio");
         }
@@ -201,7 +205,7 @@ public class ImagemService {
             throw new IllegalArgumentException("ID da pessoa é obrigatório");
         }
 
-        if (file.getSize() > maxFileSizeMB * 1024 * 1024) {
+        if (file.getSize() > (long) maxFileSizeMB * 1024 * 1024) {
             throw new IllegalArgumentException(String.format(
                     "Arquivo excede o limite de %dMB (tamanho atual: %.2fMB)",
                     maxFileSizeMB, file.getSize() / (1024.0 * 1024.0)
