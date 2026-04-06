@@ -4,6 +4,7 @@ import com.example.Tinder_ufs.security.JwtFilter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -35,6 +36,7 @@ public class SecurityConfig {
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
                 .authorizeHttpRequests(auth -> auth
+                        // ✅ Rotas públicas (não exigem token)
                         .requestMatchers(
                                 "/users/login",
                                 "/users",
@@ -42,10 +44,28 @@ public class SecurityConfig {
                                 "/login/oauth2/**",
                                 "/swagger-ui/**",
                                 "/api-docs/**",
-                                "/v3/api-docs/**",
-                                "/tags",
-                                "/tags/ativas"
+                                "/v3/api-docs/**"
                         ).permitAll()
+
+                        // ✅ Tags: GET público, POST exige autenticação
+                        .requestMatchers(HttpMethod.GET, "/tags", "/tags/ativas").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/tags").authenticated()
+                        .requestMatchers(HttpMethod.DELETE, "/tags/**").hasRole("ADMIN")
+
+                        // ✅ ✅ CORREÇÃO CRÍTICA: Rotas do proxy de imagens exigem autenticação
+                        .requestMatchers("/api/imagens/proxy/**").authenticated()
+
+                        // ✅ Rotas de imagens exigem autenticação
+                        .requestMatchers("/api/imagens/**").authenticated()
+
+                        // ✅ Rotas de perfil exigem autenticação
+                        .requestMatchers("/pessoas/**").authenticated()
+
+                        // ✅ Rotas de likes e matches exigem autenticação
+                        .requestMatchers("/likes/**").authenticated()
+                        .requestMatchers("/matches/**").authenticated()
+
+                        // ✅ Qualquer outra requisição exige autenticação
                         .anyRequest().authenticated()
                 )
 
@@ -72,11 +92,13 @@ public class SecurityConfig {
                 "http://127.0.0.1:5173",
                 "http://localhost:3000",
                 "http://localhost:8080",
-                "https://pairup-flax.vercel.app"
+                "https://pairup-flax.vercel.app",
+                "https://pairup-production-b9ee.up.railway.app"
         ));
 
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-        config.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "Origin"));
+        config.setExposedHeaders(List.of("Authorization"));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);
 
