@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 
 @RestController
-@RequestMapping("users")
+@RequestMapping("/users")  // ✅ CORRIGIDO: Adicionar barra no início
 @AllArgsConstructor
 @Tag(name = "Usuários", description = "Endpoints para gerenciamento de usuários")
 public class UserController {
@@ -34,6 +34,7 @@ public class UserController {
 
     /**
      * Retorna os dados do usuário autenticado (sem senha).
+     * ✅ CORRIGIDO: Agora exige autenticação via SecurityFilterChain
      */
     @GetMapping("/me")
     @Operation(summary = "Obter usuário logado")
@@ -42,24 +43,22 @@ public class UserController {
             @ApiResponse(responseCode = "401", description = "Não autenticado")
     })
     public ResponseEntity<?> getMe(HttpServletRequest request) {
-        String userId = SecurityUtils.getUserIdOrThrow(request);
-
-        User user = userService.findById(userId);
-        if (user == null) return ResponseEntity.notFound().build();
-
-        user.setPassword(null);
-        return ResponseEntity.ok(user);
+        try {
+            String userId = SecurityUtils.getUserIdOrThrow(request);
+            User user = userService.findById(userId);
+            if (user == null) return ResponseEntity.notFound().build();
+            user.setPassword(null);
+            return ResponseEntity.ok(user);
+        } catch (Exception e) {
+            // ✅ CORRIGIDO: Garantir 401 para não autenticado
+            log.warn("Tentativa de acesso não autorizado a /users/me");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("erro", "Usuário não autenticado"));
+        }
     }
 
     /**
      * Autentica um usuário e retorna o JWT.
-     *
-     * ✅ CORRIGIDO: captura BadCredentialsException (lançada pelo UserService via Spring Security)
-     *    em vez de ResponseStatusException — evitava que o catch nunca fosse acionado,
-     *    fazendo login inválido retornar 500 em vez de 401.
-     *
-     * TODO: adicionar rate limiting por IP (Bucket4j / Resilience4j).
-     *       Após 5 falhas consecutivas, bloquear por 15 min ou exigir CAPTCHA.
      */
     @PostMapping("/login")
     @Operation(summary = "Login de usuário")
@@ -81,18 +80,14 @@ public class UserController {
             ));
 
         } catch (BadCredentialsException e) {
-            // ✅ CORRIGIDO: era ResponseStatusException — nunca batia aqui, retornava 500
             log.warn("[AUDIT] Tentativa de login falhou para email={}", loginRequest.getEmail());
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("erro", "Credenciais inválidas."));
         }
-        // Qualquer outro erro (banco, etc.) NÃO é capturado aqui.
-        // Ele sobe para o GlobalExceptionHandler que retorna 500 sem stack trace.
     }
 
     /**
      * Cria um novo usuário.
-     * ✅ Conflito de e-mail retorna 409 — distinção clara de 400 (dados inválidos).
      */
     @PostMapping
     @Operation(summary = "Criar usuário")
@@ -114,7 +109,6 @@ public class UserController {
 
     /**
      * Atualiza dados do usuário autenticado.
-     * ✅ userId vem do JWT — o cliente não pode alterar dados de outro usuário.
      */
     @PutMapping("/me")
     @Operation(summary = "Atualizar meu usuário")
@@ -126,17 +120,20 @@ public class UserController {
             @RequestBody @Valid User user,
             HttpServletRequest request) {
 
-        String userId = SecurityUtils.getUserIdOrThrow(request);
-
-        User updated = userService.updateUser(userId, user);
-        if (updated == null) return ResponseEntity.notFound().build();
-        updated.setPassword(null);
-        return ResponseEntity.ok(updated);
+        try {
+            String userId = SecurityUtils.getUserIdOrThrow(request);
+            User updated = userService.updateUser(userId, user);
+            if (updated == null) return ResponseEntity.notFound().build();
+            updated.setPassword(null);
+            return ResponseEntity.ok(updated);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("erro", "Usuário não autenticado"));
+        }
     }
 
     /**
      * Deleta a conta do usuário autenticado.
-     * ✅ Log de auditoria antes da exclusão.
      */
     @DeleteMapping("/me")
     @Operation(summary = "Deletar minha conta")
@@ -145,10 +142,13 @@ public class UserController {
             @ApiResponse(responseCode = "401", description = "Não autenticado")
     })
     public ResponseEntity<Void> deleteMe(HttpServletRequest request) {
-        String userId = SecurityUtils.getUserIdOrThrow(request);
-
-        log.info("[AUDIT] Conta deletada para userId={}", userId);
-        userService.deleteUser(userId);
-        return ResponseEntity.noContent().build();
+        try {
+            String userId = SecurityUtils.getUserIdOrThrow(request);
+            log.info("[AUDIT] Conta deletada para userId={}", userId);
+            userService.deleteUser(userId);
+            return ResponseEntity.noContent().build();
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
     }
 }
