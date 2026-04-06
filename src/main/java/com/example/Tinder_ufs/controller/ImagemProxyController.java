@@ -45,22 +45,28 @@ public class ImagemProxyController {
             return false;
         }
 
-        // Prevenir path traversal
-        if (publicId.contains("..") ||
-                publicId.contains("./") ||
-                publicId.contains("\\") ||
-                publicId.contains("%2e") ||
-                publicId.contains("%2E") ||
-                publicId.contains("/../") ||
-                publicId.contains("\\..\\")) {
+        // ✅ CORREÇÃO: Bloquear qualquer tentativa de path traversal
+        String lowerId = publicId.toLowerCase();
+        if (lowerId.contains("..") ||
+                lowerId.contains("./") ||
+                lowerId.contains("\\") ||
+                lowerId.contains("%2e") ||
+                lowerId.contains("%2E") ||
+                lowerId.contains("/../") ||
+                lowerId.contains("\\..\\") ||
+                lowerId.contains("etc") ||
+                lowerId.contains("passwd") ||
+                lowerId.contains("shadow") ||
+                lowerId.contains("hosts") ||
+                lowerId.contains(".env")) {
             return false;
         }
 
-        // Formato válido: letras, números, underline, hífen, barra
+        // Formato válido: letras, números, underline, hífen, barra (padrão Cloudinary)
         return publicId.matches("^[a-zA-Z0-9][a-zA-Z0-9_/\\-]*$");
     }
 
-    @GetMapping("/{publicId}")
+    @GetMapping("/{publicId:.*}")  // ✅ Aceita qualquer path
     public ResponseEntity<byte[]> proxyImagem(
             @PathVariable String publicId,
             HttpServletRequest request) {
@@ -68,79 +74,64 @@ public class ImagemProxyController {
         try {
             String userId = SecurityUtils.getUserIdOrThrow(request);
 
-            // ✅ CORREÇÃO 1: Validar path traversal (retorna 400 em vez de 500)
+            log.info("Proxy request - publicId: {}, userId: {}", publicId, userId);
+
+            // ✅ CORREÇÃO 1: Validar path traversal primeiro
             if (!isValidPublicId(publicId)) {
-                log.warn("[SECURITY] Path traversal attempt: {} from user: {}", publicId, userId);
-                auditLogService.logSecurityViolation(userId, "Path traversal attempt: " + publicId);
+                log.warn("[SECURITY] Path traversal bloqueado: {} from user: {}", publicId, userId);
+                auditLogService.logSecurityViolation(userId, "Path traversal blocked: " + publicId);
                 return ResponseEntity.badRequest().build();  // 400 Bad Request
             }
 
-            // ✅ CORREÇÃO 2: Buscar imagem
+            // ✅ CORREÇÃO 2: Buscar imagem pelo publicId
             Imagem imagem;
             try {
                 imagem = imagemService.findByPublicId(publicId);
+                log.info("Imagem encontrada: ID={}, publicId={}", imagem.getId(), imagem.getPublicId());
             } catch (IllegalArgumentException e) {
                 log.warn("Imagem não encontrada: {} from user: {}", publicId, userId);
-                auditLogService.logSecurityViolation(userId, "Imagem não encontrada: " + publicId);
                 return ResponseEntity.notFound().build();  // 404 Not Found
             }
 
-            // Verificar se imagem está ativa
             if (!imagem.isAtiva()) {
-                log.warn("Imagem inativa: {} from user: {}", publicId, userId);
-                return ResponseEntity.status(HttpStatus.GONE).build();  // 410 Gone
+                log.warn("Imagem inativa: {}", publicId);
+                return ResponseEntity.status(HttpStatus.GONE).build();
             }
 
-            // ✅ CORREÇÃO 3: Verificar acesso
+            // Verificar acesso
             Pessoa solicitante = pessoaService.findByUsuarioId(userId);
             if (solicitante == null) {
-                log.warn("Solicitante não encontrado para userId: {}", userId);
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
 
             Pessoa donoImagem = imagem.getPessoa();
             if (donoImagem == null) {
-                log.warn("Dono da imagem não encontrado para publicId: {}", publicId);
                 return ResponseEntity.notFound().build();
             }
 
-            // ✅ CORREÇÃO 4: Dono da imagem tem acesso direto (IMPORTANTE!)
             boolean isPropria = solicitante.getId().equals(donoImagem.getId());
             boolean hasMatch = matchService.existeMatchAtivo(solicitante.getId(), donoImagem.getId());
 
             if (!isPropria && !hasMatch) {
-                log.warn("[SECURITY] Acesso não autorizado à imagem: {} por usuário: {}", publicId, userId);
-                auditLogService.logSecurityViolation(userId,
-                        "Acesso não autorizado à imagem: " + publicId);
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();  // 403 Forbidden
+                log.warn("[SECURITY] Acesso negado: {} -> {}", userId, publicId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
 
-            log.info("✅ Acesso permitido à imagem: {} por usuário: {} (propria: {})",
-                    publicId, userId, isPropria);
-
-            // ✅ CORREÇÃO 5: Obter MIME type
+            // Buscar imagem do Cloudinary
             String mimeType = imagem.getMimeType();
             if (mimeType == null || !MIME_ACEITOS.contains(mimeType)) {
-                mimeType = "image/jpeg"; // fallback seguro
+                mimeType = "image/jpeg";
             }
 
-            // ✅ CORREÇÃO 6: Baixar imagem do Cloudinary
             String imageUrl = cloudinary.url()
                     .secure(true)
                     .generate(publicId);
 
-            if (!imageUrl.startsWith(CLOUDINARY_URL_PREFIX)) {
-                log.error("URL gerada fora do domínio permitido: {}", imageUrl);
-                return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
-            }
-
             byte[] imageBytes = downloadImage(imageUrl);
             if (imageBytes == null || imageBytes.length == 0) {
-                log.error("Falha ao baixar imagem: {}", imageUrl);
                 return ResponseEntity.notFound().build();
             }
 
-            // Registrar acesso
             auditLogService.logImageAccess(userId, publicId, "PROXY_ACCESS");
 
             HttpHeaders headers = new HttpHeaders();
@@ -150,7 +141,7 @@ public class ImagemProxyController {
             return new ResponseEntity<>(imageBytes, headers, HttpStatus.OK);
 
         } catch (Exception e) {
-            log.error("Erro no proxy de imagem: {}", e.getMessage(), e);
+            log.error("Erro no proxy: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
@@ -158,13 +149,12 @@ public class ImagemProxyController {
     private byte[] downloadImage(String imageUrl) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL(imageUrl).openConnection();
         connection.setRequestMethod("GET");
-        connection.setConnectTimeout(5000);
-        connection.setReadTimeout(5000);
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(10000);
         connection.setRequestProperty("User-Agent", "TinderUfs/1.0");
 
         int responseCode = connection.getResponseCode();
         if (responseCode != HttpURLConnection.HTTP_OK) {
-            log.error("Erro ao baixar imagem. HTTP Status: {}", responseCode);
             return null;
         }
 
