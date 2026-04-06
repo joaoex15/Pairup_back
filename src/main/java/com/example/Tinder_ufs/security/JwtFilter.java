@@ -26,12 +26,11 @@ public class JwtFilter extends OncePerRequestFilter {
     private final JwtService jwtService;
     private final UserDetailsService userDetailsService;
 
-    // ✅ Rotas públicas (não precisam de token)
     private static final List<PublicRoute> PUBLIC_ROUTES = List.of(
-            new PublicRoute("POST", "/users"),           // Criar usuário
-            new PublicRoute("POST", "/users/login"),     // Login
-            new PublicRoute("GET", "/tags"),             // Listar tags
-            new PublicRoute("GET", "/tags/ativas")       // Listar tags ativas
+            new PublicRoute("POST", "/users"),
+            new PublicRoute("POST", "/users/login"),
+            new PublicRoute("GET", "/tags"),
+            new PublicRoute("GET", "/tags/ativas")
     );
 
     private record PublicRoute(String method, String path) {}
@@ -46,7 +45,6 @@ public class JwtFilter extends OncePerRequestFilter {
         final String requestPath = request.getRequestURI();
         final String requestMethod = request.getMethod();
 
-        // ✅ Verificar se é rota pública
         if (isPublicRoute(requestMethod, requestPath)) {
             log.debug("Rota pública - pulando autenticação: {} {}", requestMethod, requestPath);
             filterChain.doFilter(request, response);
@@ -55,7 +53,6 @@ public class JwtFilter extends OncePerRequestFilter {
 
         final String authHeader = request.getHeader("Authorization");
 
-        // ✅ Rota protegida sem token = 401 UNAUTHORIZED
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             log.warn("❌ Rota protegida sem token: {} {}", requestMethod, requestPath);
             sendUnauthorizedResponse(response, "Token não fornecido");
@@ -65,7 +62,6 @@ public class JwtFilter extends OncePerRequestFilter {
         try {
             final String token = authHeader.substring(7);
 
-            // ✅ Verificar se o token é válido
             if (!jwtService.isTokenValid(token)) {
                 log.warn("❌ Token inválido para rota: {} {}", requestMethod, requestPath);
                 sendUnauthorizedResponse(response, "Token inválido");
@@ -77,7 +73,6 @@ public class JwtFilter extends OncePerRequestFilter {
             if (userId != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 UserDetails userDetails = userDetailsService.loadUserByUsername(userId);
 
-                // ✅ Usar o método que valida token com UserDetails
                 if (jwtService.isTokenValid(token, userDetails)) {
                     UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                             userDetails,

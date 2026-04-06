@@ -1,23 +1,25 @@
 package com.example.Tinder_ufs.models;
 
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-@Document(collection = "user")
+@Document(collection = "users")
 @Data
 @NoArgsConstructor
 public class User {
     @Id
     private String id;
 
-    private String nome; // ← removido @NotBlank
+    private String nome;
 
     @Email
     @NotBlank
+    @Indexed(unique = true)
     private String email;
 
     private String password;

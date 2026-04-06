@@ -31,27 +31,24 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
 
-                // API é stateless: não cria sessão HTTP
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
                 .authorizeHttpRequests(auth -> auth
-                        // ✅ Apenas rotas realmente públicas
                         .requestMatchers(
                                 "/users/login",
-                                "/users",                     // criação de conta
-                                "/oauth2/**",                 // fluxo OAuth2 do Google
+                                "/users",
+                                "/oauth2/**",
                                 "/login/oauth2/**",
                                 "/swagger-ui/**",
                                 "/api-docs/**",
-                                "/v3/api-docs/**"
+                                "/v3/api-docs/**",
+                                "/tags",
+                                "/tags/ativas"
                         ).permitAll()
-
-                        // ✅ Tudo o mais exige JWT válido (incluindo /api/imagens/proxy/**)
                         .anyRequest().authenticated()
                 )
 
-                // OAuth2 login Google
                 .oauth2Login(oauth2 -> oauth2
                         .successHandler(oAuth2SuccessHandler)
                 )
@@ -70,7 +67,6 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
 
-        // ✅ Lista fechada de origens permitidas
         config.setAllowedOrigins(List.of(
                 "http://localhost:5173",
                 "http://127.0.0.1:5173",

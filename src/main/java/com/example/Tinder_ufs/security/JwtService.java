@@ -12,13 +12,9 @@ import java.util.Date;
 @Service
 public class JwtService {
 
-    // Leia o segredo de uma variável de ambiente / application.properties
-    // No Railway: defina JWT_SECRET como uma string aleatória de 64+ caracteres
-    // Exemplo local em application.properties: jwt.secret=${JWT_SECRET}
     @Value("${jwt.secret}")
     private String SECRET;
 
-    // Expiração curta: 15 minutos (era 1 dia — muito longo)
     private static final long EXPIRATION_MS = 15 * 60 * 1000L;
 
     private Key getKey() {
@@ -31,9 +27,6 @@ public class JwtService {
         return Keys.hmacShaKeyFor(SECRET.getBytes());
     }
 
-    /**
-     * Gera um token JWT para o userId
-     */
     public String generateToken(String userId) {
         return Jwts.builder()
                 .setSubject(userId)
@@ -43,9 +36,6 @@ public class JwtService {
                 .compact();
     }
 
-    /**
-     * Extrai o userId do token
-     */
     public String extractUserId(String token) {
         try {
             return Jwts.parserBuilder()
@@ -59,10 +49,6 @@ public class JwtService {
         }
     }
 
-    /**
-     * Valida se o token é válido (não expirado, assinatura correta)
-     * ✅ CORRIGIDO: Retorna false em vez de lançar exceção
-     */
     public boolean isTokenValid(String token) {
         try {
             Jwts.parserBuilder()
@@ -71,27 +57,18 @@ public class JwtService {
                     .parseClaimsJws(token);
             return true;
         } catch (ExpiredJwtException e) {
-            // Token expirado
             return false;
         } catch (MalformedJwtException e) {
-            // Token mal formatado
             return false;
         } catch (SignatureException e) {
-            // Assinatura inválida
             return false;
         } catch (IllegalArgumentException e) {
-            // Token vazio ou null
             return false;
         } catch (JwtException e) {
-            // Qualquer outro erro JWT
             return false;
         }
     }
 
-    /**
-     * Valida o token para um UserDetails específico
-     * ✅ CORRIGIDO: Verifica se o userId do token corresponde ao do UserDetails
-     */
     public boolean isTokenValid(String token, UserDetails userDetails) {
         try {
             String userId = extractUserId(token);
@@ -99,10 +76,7 @@ public class JwtService {
                 return false;
             }
 
-            // Verifica se o userId do token corresponde ao username do UserDetails
             boolean isUserIdValid = userId.equals(userDetails.getUsername());
-
-            // Verifica se o token não está expirado
             boolean isTokenExpired = isTokenExpired(token);
 
             return isUserIdValid && !isTokenExpired;
@@ -112,9 +86,6 @@ public class JwtService {
         }
     }
 
-    /**
-     * Verifica se o token está expirado
-     */
     private boolean isTokenExpired(String token) {
         try {
             Date expiration = Jwts.parserBuilder()
@@ -129,9 +100,6 @@ public class JwtService {
         }
     }
 
-    /**
-     * Obtém a data de expiração do token
-     */
     public Date getExpirationDate(String token) {
         try {
             return Jwts.parserBuilder()
@@ -145,16 +113,12 @@ public class JwtService {
         }
     }
 
-    /**
-     * Verifica se o token pode ser renovado (ex: menos de 5 min para expirar)
-     */
     public boolean isTokenRefreshable(String token) {
         Date expiration = getExpirationDate(token);
         if (expiration == null) {
             return false;
         }
 
-        // Se falta menos de 5 minutos para expirar, pode renovar
         long fiveMinutesInMs = 5 * 60 * 1000L;
         long timeUntilExpiration = expiration.getTime() - System.currentTimeMillis();
 
