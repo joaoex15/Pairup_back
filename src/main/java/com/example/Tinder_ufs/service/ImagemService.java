@@ -8,18 +8,15 @@ import com.example.Tinder_ufs.repositories.ImagemRepository;
 import com.example.Tinder_ufs.repositories.PessoaRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.security.SecureRandom;
-import java.util.Base64;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
+import java.util.UUID;
 
 @Slf4j
 @Service
@@ -29,200 +26,197 @@ public class ImagemService {
     private final Cloudinary cloudinary;
     private final ImagemRepository imagemRepository;
     private final PessoaRepository pessoaRepository;
-    private final AuditLogService auditLogService;
 
-    @Value("${app.max-images-per-user:10}")
-    private int maxImagesPerUser;
-
-    @Value("${app.max-file-size-mb:5}")
-    private int maxFileSizeMB;
-
-    private static final Set<String> ALLOWED_MIME_TYPES = Set.of(
-            "image/jpeg", "image/png", "image/webp", "image/gif"
-    );
-
-    private static final String FOLDER_BASE = "tinder_ufs_fotos";
-
+    /**
+     * Salva uma imagem no Cloudinary e no banco de dados
+     * ✅ CORRIGIDO: Sem transformações inválidas
+     */
     @Transactional
-    public Imagem salvarImagem(MultipartFile file, String pessoaId, boolean isPerfil) {
-        // 1. Validações de segurança
-        // ✅ CORRIGIDO: validação centralizada em validateImageUpload — removida verificação
-        //    duplicada de tamanho que existia logo abaixo dentro do try.
-        validateImageUpload(file, pessoaId);
+    public Imagem salvarImagem(MultipartFile file, String pessoaId, boolean isPerfil) throws IOException {
+        log.info("Salvando imagem para pessoaId: {}, isPerfil: {}", pessoaId, isPerfil);
+
+        // 1. Validações
+        validarArquivo(file);
 
         // 2. Buscar pessoa
         Pessoa pessoa = pessoaRepository.findById(pessoaId)
-                .orElseThrow(() -> new SecurityException("Pessoa não encontrada"));
+                .orElseThrow(() -> new IllegalArgumentException("Pessoa não encontrada com ID: " + pessoaId));
 
-        // 3. Verificar limite de imagens
-        long imageCount = imagemRepository.countByPessoaAndAtivaTrue(pessoa);
-        if (imageCount >= maxImagesPerUser) {
-            throw new IllegalStateException("Limite máximo de " + maxImagesPerUser + " imagens atingido");
+        // 3. Upload para Cloudinary (SEM transformações)
+        Map<String, Object> uploadParams = ObjectUtils.asMap(
+                "folder", "tinder_ufs/" + pessoaId,
+                "use_filename", true,
+                "unique_filename", true,
+                "overwrite", false
+        );
+
+        Map<?, ?> uploadResult;
+        try {
+            uploadResult = cloudinary.uploader().upload(file.getBytes(), uploadParams);
+            log.debug("Upload result: publicId={}", uploadResult.get("public_id"));
+        } catch (Exception e) {
+            log.error("Erro no upload para Cloudinary: {}", e.getMessage());
+            throw new IOException("Erro ao fazer upload da imagem: " + e.getMessage(), e);
         }
 
-        // 4. Se for perfil, desativar foto de perfil anterior
+        // 4. Extrair dados
+        String publicId = (String) uploadResult.get("public_id");
+        String url = (String) uploadResult.get("secure_url");
+        long tamanhoBytes = (Long) uploadResult.get("bytes");
+        String folderPath = publicId.contains("/") ? publicId.substring(0, publicId.lastIndexOf('/')) : "";
+        String mimeType = file.getContentType();
+
+        log.info("Upload realizado. PublicId: {}, URL: {}", publicId, url);
+
+        // 5. Se for foto de perfil, remover flag de outras fotos
         if (isPerfil) {
-            imagemRepository.findByPessoaAndPerfilTrue(pessoa)
-                    .ifPresent(perfilAntigo -> {
-                        perfilAntigo.setPerfil(false);
-                        imagemRepository.save(perfilAntigo);
-                        log.info("Foto de perfil anterior desativada: {}", perfilAntigo.getId());
+            imagemRepository.findByPessoaIdAndPerfilTrue(pessoaId)
+                    .ifPresent(imagemExistente -> {
+                        imagemExistente.setPerfil(false);
+                        imagemRepository.save(imagemExistente);
+                        log.info("Removida flag de perfil da imagem: {}", imagemExistente.getId());
                     });
         }
 
-        // 5. Criar pasta única para o usuário
-        String userFolder = String.format("%s/usuario_%s", FOLDER_BASE, pessoa.getId());
+        // 6. Criar e salvar imagem
+        Imagem imagem = new Imagem(
+                pessoa,
+                url,
+                publicId,
+                folderPath,
+                isPerfil,
+                tamanhoBytes,
+                mimeType
+        );
+        imagem.setId(UUID.randomUUID().toString());
+        imagem.setDataUpload(LocalDateTime.now());
+        imagem.setAtiva(true);
 
-        // 6. Gerar nome único com timestamp e hash
-        String timestamp = String.valueOf(System.currentTimeMillis());
-        String randomHash = generateSecureHash();
-        String fileName = String.format("img_%s_%s", timestamp, randomHash);
-        String fullPublicId = String.format("%s/%s", userFolder, fileName);
+        Imagem saved = imagemRepository.save(imagem);
+        log.info("Imagem salva no banco com ID: {}", saved.getId());
 
-        // 7. Validar MIME type
-        String mimeType = file.getContentType();
-        if (!ALLOWED_MIME_TYPES.contains(mimeType)) {
-            throw new IllegalArgumentException("Tipo de arquivo não permitido");
-        }
-
-        try {
-            // 8. Upload para Cloudinary com transformações seguras
-            Map<String, Object> uploadOptions = ObjectUtils.asMap(
-                    "public_id", fullPublicId,
-                    "folder", userFolder,
-                    "transformation", new Object[][]{
-                            {"crop", "fill"},
-                            {"gravity", "face"},
-                            {"width", 800},
-                            {"height", 800},
-                            {"quality", "auto:good"},
-                            {"fetch_format", "auto"}
-                    },
-                    "allowed_formats", new String[]{"jpg", "jpeg", "png", "webp", "gif"},
-                    "type", "upload",
-                    "overwrite", false,
-                    "unique_filename", false
-            );
-
-            Map<String, Object> uploadResult = cloudinary.uploader().upload(file.getBytes(), uploadOptions);
-
-            String secureUrl = uploadResult.get("secure_url").toString();
-            String publicId = uploadResult.get("public_id").toString();
-            long tamanhoBytes = (long) uploadResult.getOrDefault("bytes", 0L);
-
-            // 9. Salvar no MongoDB
-            Imagem imagem = new Imagem(
-                    pessoa, secureUrl, publicId, userFolder,
-                    isPerfil, tamanhoBytes, mimeType
-            );
-
-            Imagem savedImagem = imagemRepository.save(imagem);
-
-            // 10. Log de auditoria
-            auditLogService.logImageUpload(pessoa.getId(), savedImagem.getId(), isPerfil);
-
-            log.info("Imagem salva com sucesso - ID: {}, Usuário: {}, Perfil: {}",
-                    savedImagem.getId(), pessoa.getId(), isPerfil);
-
-            return savedImagem;
-
-        } catch (IOException e) {
-            log.error("Erro no upload da imagem para usuário {}: {}", pessoaId, e.getMessage());
-            throw new RuntimeException("Erro ao processar imagem: " + e.getMessage(), e);
-        }
-    }
-
-    @Transactional
-    public void deletarImagem(String imagemId, String pessoaId) {
-        // 1. Buscar imagem
-        Imagem imagem = imagemRepository.findById(imagemId)
-                .orElseThrow(() -> new IllegalArgumentException("Imagem não encontrada"));
-
-        // 2. Verificar propriedade
-        if (!imagem.getPessoa().getId().equals(pessoaId)) {
-            auditLogService.logSecurityViolation(pessoaId, "Tentativa de deletar imagem de outro usuário");
-            throw new SecurityException("Acesso negado: você não é o proprietário desta imagem");
-        }
-
-        // 3. Verificar se é a única foto (não pode deletar a última)
-        long activeImages = imagemRepository.countByPessoaAndAtivaTrue(imagem.getPessoa());
-        if (activeImages <= 1) {
-            throw new IllegalStateException("Não é possível deletar a última foto do perfil");
-        }
-
-        // 4. Soft delete (marca como inativa)
-        imagem.setAtiva(false);
-
-        // 5. Se era foto de perfil, promover outra
-        if (imagem.isPerfil()) {
-            Optional<Imagem> outraImagem = imagemRepository.findActiveImagesByPessoa(imagem.getPessoa())
-                    .stream()
-                    .filter(img -> !img.getId().equals(imagemId))
-                    .findFirst();
-
-            outraImagem.ifPresent(outra -> {
-                outra.setPerfil(true);
-                imagemRepository.save(outra);
-                log.info("Nova foto de perfil promovida: {}", outra.getId());
-            });
-        }
-
-        imagemRepository.save(imagem);
-
-        // 6. ✅ CORRIGIDO: deleção do Cloudinary ativada com tratamento de erro isolado.
-        //    Antes estava comentada — imagem sumia do banco mas permanecia no storage.
-        //    O erro no Cloudinary não cancela a operação principal (soft delete já feito).
-        try {
-            Map result = cloudinary.uploader().destroy(imagem.getPublicId(), ObjectUtils.emptyMap());
-            log.info("Imagem removida do Cloudinary - publicId={}, result={}",
-                    imagem.getPublicId(), result.get("result"));
-        } catch (IOException cloudinaryEx) {
-            // Registrar para revisão manual ou fila de retry — não reverter o soft delete
-            log.error("Falha ao remover imagem do Cloudinary (publicId={}): {}. " +
-                            "Imagem permanece no storage e deve ser removida manualmente.",
-                    imagem.getPublicId(), cloudinaryEx.getMessage());
-        }
-
-        auditLogService.logImageDeletion(pessoaId, imagemId);
-        log.info("Imagem desativada - ID: {}, Usuário: {}", imagemId, pessoaId);
-    }
-
-    public Imagem findByPublicId(String publicId) {
-        return imagemRepository.findByPublicId(publicId)
-                .orElseThrow(() -> new IllegalArgumentException("Imagem não encontrada"));
+        return saved;
     }
 
     /**
-     * ✅ CORRIGIDO: removido parâmetro isPerfil desnecessário — não é usado na validação.
-     *    Removida verificação de tamanho duplicada que existia também dentro do salvarImagem.
+     * Valida o arquivo antes do upload
      */
-    private void validateImageUpload(MultipartFile file, String pessoaId) {
+    private void validarArquivo(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("Arquivo não pode ser vazio");
         }
 
-        if (pessoaId == null || pessoaId.trim().isEmpty()) {
-            throw new IllegalArgumentException("ID da pessoa é obrigatório");
+        String mimeType = file.getContentType();
+        if (mimeType == null || !mimeType.startsWith("image/")) {
+            throw new IllegalArgumentException("Tipo de arquivo não permitido. Envie apenas imagens (JPEG, PNG, GIF, WEBP).");
         }
 
-        if (file.getSize() > (long) maxFileSizeMB * 1024 * 1024) {
-            throw new IllegalArgumentException(String.format(
-                    "Arquivo excede o limite de %dMB (tamanho atual: %.2fMB)",
-                    maxFileSizeMB, file.getSize() / (1024.0 * 1024.0)
-            ));
+        // Validar tamanho (max 5MB = 5 * 1024 * 1024 bytes)
+        if (file.getSize() > 5 * 1024 * 1024) {
+            throw new IllegalArgumentException("Arquivo excede o limite de 5MB. Tamanho máximo: 5MB");
+        }
+
+        // Validar extensões permitidas
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename != null) {
+            String extension = originalFilename.substring(originalFilename.lastIndexOf(".") + 1).toLowerCase();
+            List<String> allowedExtensions = List.of("jpg", "jpeg", "png", "gif", "webp");
+            if (!allowedExtensions.contains(extension)) {
+                throw new IllegalArgumentException("Extensão de arquivo não permitida. Use: JPG, JPEG, PNG, GIF ou WEBP");
+            }
         }
     }
 
-    private String generateSecureHash() {
-        SecureRandom secureRandom = new SecureRandom();
-        byte[] hashBytes = new byte[16];
-        secureRandom.nextBytes(hashBytes);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(hashBytes);
+    /**
+     * Deleta uma imagem (soft delete)
+     */
+    @Transactional
+    public void deletarImagem(String imagemId, String pessoaId) {
+        log.info("Deletando imagem: {} para pessoaId: {}", imagemId, pessoaId);
+
+        Imagem imagem = imagemRepository.findById(imagemId)
+                .orElseThrow(() -> new IllegalArgumentException("Imagem não encontrada: " + imagemId));
+
+        // Verificar se a imagem pertence à pessoa
+        if (!imagem.getPessoa().getId().equals(pessoaId)) {
+            throw new SecurityException("Acesso negado: você não é o proprietário desta imagem");
+        }
+
+        // Verificar se é a última imagem ativa
+        long countAtivas = imagemRepository.countByPessoaIdAndAtivaTrue(pessoaId);
+        if (countAtivas <= 1 && imagem.isAtiva()) {
+            throw new IllegalStateException("Não é possível deletar a última imagem do perfil");
+        }
+
+        // Deletar do Cloudinary
+        try {
+            Map<?, ?> result = cloudinary.uploader().destroy(imagem.getPublicId(), ObjectUtils.emptyMap());
+            log.info("Resultado da deleção no Cloudinary: {}", result.get("result"));
+        } catch (Exception e) {
+            log.error("Erro ao deletar imagem do Cloudinary: {}", e.getMessage());
+            // Continua mesmo se falhar no Cloudinary
+        }
+
+        // Soft delete no banco
+        imagem.setAtiva(false);
+        imagemRepository.save(imagem);
+
+        log.info("Imagem marcada como inativa: {}", imagemId);
     }
 
+    /**
+     * Busca imagem pelo publicId
+     */
+    @Transactional(readOnly = true)
+    public Imagem findByPublicId(String publicId) {
+        return imagemRepository.findByPublicId(publicId)
+                .orElseThrow(() -> new IllegalArgumentException("Imagem não encontrada: " + publicId));
+    }
+
+    /**
+     * Busca imagem pelo ID
+     */
+    @Transactional(readOnly = true)
+    public Imagem findById(String id) {
+        return imagemRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Imagem não encontrada: " + id));
+    }
+
+    /**
+     * Lista imagens ativas de um usuário
+     */
+    @Transactional(readOnly = true)
     public List<Imagem> listarImagensAtivasPorUsuario(String pessoaId) {
-        Pessoa pessoa = pessoaRepository.findById(pessoaId)
-                .orElseThrow(() -> new IllegalArgumentException("Pessoa não encontrada"));
-        return imagemRepository.findActiveImagesByPessoa(pessoa);
+        return imagemRepository.findByPessoaIdAndAtivaTrue(pessoaId);
+    }
+
+    /**
+     * Define uma imagem como foto de perfil
+     */
+    @Transactional
+    public Imagem definirFotoPerfil(String imagemId, String pessoaId) {
+        log.info("Definindo imagem {} como foto de perfil para pessoa: {}", imagemId, pessoaId);
+
+        // Buscar a imagem
+        Imagem imagem = findById(imagemId);
+
+        // Verificar propriedade
+        if (!imagem.getPessoa().getId().equals(pessoaId)) {
+            throw new SecurityException("Acesso negado: você não é o proprietário desta imagem");
+        }
+
+        // Remover flag de perfil de todas as outras imagens
+        imagemRepository.findByPessoaIdAndPerfilTrue(pessoaId)
+                .ifPresent(perfilAtual -> {
+                    perfilAtual.setPerfil(false);
+                    imagemRepository.save(perfilAtual);
+                });
+
+        // Definir nova foto de perfil
+        imagem.setPerfil(true);
+        imagemRepository.save(imagem);
+
+        log.info("Foto de perfil atualizada para imagem: {}", imagemId);
+        return imagem;
     }
 }

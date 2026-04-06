@@ -82,12 +82,8 @@ public class PessoaService {
                 .orElse(null);
     }
 
-    // ==================== FILTROS (CORRIGIDO: sem N+1) ====================
+    // ==================== FILTROS ====================
 
-    /**
-     * ✅ CORRIGIDO: filtros delegados ao MongoDB (sem carregar tudo em memória).
-     *    Imagens buscadas em uma única query por lote de IDs (sem N+1).
-     */
     @Transactional(readOnly = true)
     public Page<PessoaPerfilDTO> getAllPerfisWithFilters(
             Interesse interesse, Genero genero, Pageable pageable) {
@@ -104,7 +100,7 @@ public class PessoaService {
             page = pessoaRepository.findByAtivoTrue(pageable);
         }
 
-        if (page.isEmpty()) return page.map(p -> null); // retorna Page vazia tipada
+        if (page.isEmpty()) return page.map(p -> null);
 
         // 2. Buscar TODAS as imagens da página em uma única query (evita N+1)
         List<String> pessoaIds = page.getContent().stream()
@@ -203,10 +199,16 @@ public class PessoaService {
         return convertToRedesSociaisDTO(pessoa);
     }
 
+    /**
+     * ✅ Busca pessoa pelo ID
+     */
     public Pessoa findById(String id) {
         return pessoaRepository.findById(id).orElse(null);
     }
 
+    /**
+     * ✅ Busca pessoa pelo ID do usuário (userId do User)
+     */
     public Pessoa findByUsuarioId(String usuarioId) {
         return pessoaRepository.findByUsuarioId(usuarioId).orElse(null);
     }

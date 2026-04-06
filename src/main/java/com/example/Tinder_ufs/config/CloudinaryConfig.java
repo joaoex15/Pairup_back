@@ -23,11 +23,13 @@ public class CloudinaryConfig {
 
     @Bean
     public Cloudinary cloudinary() {
-        Map<String, String> config = new HashMap<>();
+        Map<String, Object> config = new HashMap<>();
         config.put("cloud_name", cloudName);
         config.put("api_key", apiKey);
         config.put("api_secret", apiSecret);
-        config.put("secure", "true");
+        config.put("secure", true);
+
+        // ✅ SEM transformações aqui
         return new Cloudinary(config);
     }
 }
