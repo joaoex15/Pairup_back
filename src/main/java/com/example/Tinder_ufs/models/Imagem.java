@@ -47,6 +47,7 @@ public class Imagem {
 
     private boolean ativa = true;
 
+    // No construtor da classe Imagem, garantir que tamanhoBytes seja long
     public Imagem(Pessoa pessoa, String url, String publicId, String folderPath,
                   boolean perfil, long tamanhoBytes, String mimeType) {
         this.pessoa = pessoa;
@@ -54,7 +55,7 @@ public class Imagem {
         this.publicId = publicId;
         this.folderPath = folderPath;
         this.perfil = perfil;
-        this.tamanhoBytes = tamanhoBytes;
+        this.tamanhoBytes = tamanhoBytes;  // ← deve ser long
         this.mimeType = mimeType;
         this.dataUpload = LocalDateTime.now();
         this.ativa = true;
