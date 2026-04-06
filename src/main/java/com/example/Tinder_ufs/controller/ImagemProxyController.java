@@ -56,8 +56,8 @@ public class ImagemProxyController {
             return false;
         }
 
-        // Formato válido: letras, números, underline, hífen, barra
-        return publicId.matches("^[a-zA-Z0-9][a-zA-Z0-9_/\\-]*$");
+        // ✅ CORREÇÃO: publicId do Cloudinary pode conter letras, números, underline, hífen, barra e ponto
+        return publicId.matches("^[a-zA-Z0-9][a-zA-Z0-9_/\\-.]*$");
     }
 
     @GetMapping("/{publicId}")
@@ -68,6 +68,8 @@ public class ImagemProxyController {
         try {
             String userId = SecurityUtils.getUserIdOrThrow(request);
 
+            log.info("Proxy request - publicId: {}, userId: {}", publicId, userId);
+
             // ✅ CORREÇÃO 1: Validar path traversal (retorna 400 em vez de 500)
             if (!isValidPublicId(publicId)) {
                 log.warn("[SECURITY] Path traversal attempt: {} from user: {}", publicId, userId);
@@ -75,12 +77,14 @@ public class ImagemProxyController {
                 return ResponseEntity.badRequest().build();  // 400 Bad Request
             }
 
-            // ✅ CORREÇÃO 2: Buscar imagem
+            // ✅ CORREÇÃO 2: Buscar imagem pelo publicId do Cloudinary
             Imagem imagem;
             try {
                 imagem = imagemService.findByPublicId(publicId);
+                log.info("Imagem encontrada: ID={}, publicId={}, ativa={}",
+                        imagem.getId(), imagem.getPublicId(), imagem.isAtiva());
             } catch (IllegalArgumentException e) {
-                log.warn("Imagem não encontrada: {} from user: {}", publicId, userId);
+                log.warn("Imagem não encontrada para publicId: {} from user: {}", publicId, userId);
                 auditLogService.logSecurityViolation(userId, "Imagem não encontrada: " + publicId);
                 return ResponseEntity.notFound().build();  // 404 Not Found
             }
@@ -104,9 +108,11 @@ public class ImagemProxyController {
                 return ResponseEntity.notFound().build();
             }
 
-            // ✅ CORREÇÃO 4: Dono da imagem tem acesso direto (IMPORTANTE!)
+            // ✅ CORREÇÃO 4: Dono da imagem tem acesso direto
             boolean isPropria = solicitante.getId().equals(donoImagem.getId());
             boolean hasMatch = matchService.existeMatchAtivo(solicitante.getId(), donoImagem.getId());
+
+            log.info("Acesso - Propria: {}, HasMatch: {}", isPropria, hasMatch);
 
             if (!isPropria && !hasMatch) {
                 log.warn("[SECURITY] Acesso não autorizado à imagem: {} por usuário: {}", publicId, userId);
@@ -124,10 +130,12 @@ public class ImagemProxyController {
                 mimeType = "image/jpeg"; // fallback seguro
             }
 
-            // ✅ CORREÇÃO 6: Baixar imagem do Cloudinary
+            // ✅ CORREÇÃO 6: Gerar URL do Cloudinary usando o publicId correto
             String imageUrl = cloudinary.url()
                     .secure(true)
-                    .generate(publicId);
+                    .generate(publicId);  // ← usa o publicId do Cloudinary
+
+            log.info("Gerando URL: {}", imageUrl);
 
             if (!imageUrl.startsWith(CLOUDINARY_URL_PREFIX)) {
                 log.error("URL gerada fora do domínio permitido: {}", imageUrl);
@@ -158,8 +166,8 @@ public class ImagemProxyController {
     private byte[] downloadImage(String imageUrl) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL(imageUrl).openConnection();
         connection.setRequestMethod("GET");
-        connection.setConnectTimeout(5000);
-        connection.setReadTimeout(5000);
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(10000);
         connection.setRequestProperty("User-Agent", "TinderUfs/1.0");
 
         int responseCode = connection.getResponseCode();
