@@ -22,35 +22,15 @@ public class PessoaPerfilDTO {
     private Genero genero;
     private Interesse interesse;
     private String descricao;
-
-    // ✅ CORRIGIDO: mudado de List<Tag> para List<String>
     private List<String> tags;
+    private boolean cienciaResponsabilidade;  // Adicione se não tiver
 
-    // ==================== CAMPOS ADICIONADOS ====================
-
-    /** Lista de imagens do usuário */
+    // ✅ ADICIONE ESTES CAMPOS (igual ao PessoaCompletaDTO)
     private List<Imagem> imagens;
-
-    /** URL da foto de perfil */
     private String fotoPerfilUrl;
 
-    // ==================== MÉTODOS AUXILIARES ====================
-
-    /**
-     * Verifica se o usuário tem foto de perfil
-     */
+    // Métodos auxiliares (opcional)
     public boolean hasFotoPerfil() {
         return fotoPerfilUrl != null && !fotoPerfilUrl.isEmpty();
-    }
-
-    /**
-     * Retorna a quantidade de imagens na galeria (excluindo foto de perfil)
-     */
-    public int getQuantidadeGaleria() {
-        if (imagens == null) return 0;
-        if (fotoPerfilUrl == null) return imagens.size();
-        return (int) imagens.stream()
-                .filter(img -> !img.getUrl().equals(fotoPerfilUrl))
-                .count();
     }
 }
