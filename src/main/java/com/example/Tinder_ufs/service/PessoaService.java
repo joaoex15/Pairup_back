@@ -112,7 +112,7 @@ public class PessoaService {
         Map<String, List<Imagem>> imagensPorPessoa = todasImagens.stream()
                 .collect(Collectors.groupingBy(img -> img.getPessoa().getId()));
 
-        // 3. Montar DTOs sem novas queries
+        // 3. Montar DTOs com as imagens
         List<PessoaPerfilDTO> dtos = page.getContent().stream().map(pessoa -> {
             PessoaPerfilDTO dto = convertToPerfilDTO(pessoa);
             List<Imagem> imagens = imagensPorPessoa.getOrDefault(pessoa.getId(), List.of());
@@ -279,6 +279,16 @@ public class PessoaService {
         } else {
             dto.setTags(new ArrayList<>());
         }
+
+        // ✅ CORREÇÃO: Adicionar imagens ao DTO
+        List<Imagem> imagens = imagemRepository.findByPessoaAndAtivaTrue(pessoa);
+        dto.setImagens(imagens);
+
+        // ✅ CORREÇÃO: Adicionar foto de perfil ao DTO
+        imagens.stream()
+                .filter(Imagem::isPerfil)
+                .findFirst()
+                .ifPresent(perfil -> dto.setFotoPerfilUrl(perfil.getUrl()));
 
         return dto;
     }
