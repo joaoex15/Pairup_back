@@ -35,11 +35,6 @@ public class PessoaController {
 
     private final PessoaService pessoaService;
 
-    /**
-     * Lista perfis com filtros.
-     * ✅ Exige JWT — perfis não devem ser expostos publicamente.
-     * ✅ Paginado — evita OOM com muitos registros.
-     */
     @GetMapping
     @Operation(summary = "Listar perfis com filtros")
     @ApiResponses({
@@ -59,10 +54,6 @@ public class PessoaController {
         );
     }
 
-    /**
-     * Busca perfil público de uma pessoa.
-     * ✅ Exige JWT — informações pessoais só para usuários autenticados.
-     */
     @GetMapping("/{id}/perfil")
     @Operation(summary = "Buscar perfil da pessoa")
     @ApiResponses({
@@ -81,9 +72,6 @@ public class PessoaController {
         return ResponseEntity.notFound().build();
     }
 
-    /**
-     * Redes sociais — disponível APENAS via /matches/{matchId}/redes-sociais.
-     */
     @GetMapping("/{id}/redes-sociais")
     @Operation(summary = "Buscar redes sociais da pessoa",
             description = "Acesso direto bloqueado. Use GET /matches/{matchId}/redes-sociais.")
@@ -94,11 +82,6 @@ public class PessoaController {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
     }
 
-    /**
-     * Cria perfil vinculado ao usuário autenticado.
-     * ✅ Verifica se cienciaResponsabilidade = TRUE antes de criar
-     * ✅ userId vem do token — o cliente nunca pode vincular o perfil a outro usuário
-     */
     @PostMapping
     @Operation(summary = "Criar meu perfil")
     @ApiResponses({
@@ -108,31 +91,39 @@ public class PessoaController {
             @ApiResponse(responseCode = "409", description = "Perfil já existe para este usuário")
     })
     public ResponseEntity<?> create(
-            @RequestBody @Valid Pessoa pessoa,
+            @RequestBody @Valid PessoaPerfilDTO pessoaDTO,  // ✅ MUDOU PARA DTO
             HttpServletRequest request) {
 
         String userId = SecurityUtils.getUserIdOrThrow(request);
 
-        // ✅ VERIFICAÇÃO OBRIGATÓRIA: ciência de responsabilidade deve ser TRUE
-        if (!pessoa.isCienciaResponsabilidade()) {
+        if (!pessoaDTO.isCienciaResponsabilidade()) {
             log.warn("[AUDIT] Tentativa de criar perfil sem aceitar termos - userId={}", userId);
             return ResponseEntity
                     .status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", "É necessário aceitar os termos de responsabilidade para criar uma conta"));
         }
 
-        // Verifica se já existe perfil para este usuário
         if (pessoaService.findByUsuarioId(userId) != null) {
             return ResponseEntity
                     .status(HttpStatus.CONFLICT)
                     .body(Map.of("error", "Perfil já existe para este usuário"));
         }
 
+        // Converte DTO para Pessoa
+        Pessoa pessoa = new Pessoa();
+        pessoa.setNome(pessoaDTO.getNome());
+        pessoa.setCurso(pessoaDTO.getCurso());
+        pessoa.setDataNasc(pessoaDTO.getDataNasc());
+        pessoa.setEmail(pessoaDTO.getEmail());
+        pessoa.setGenero(pessoaDTO.getGenero());
+        pessoa.setInteresse(pessoaDTO.getInteresse());
+        pessoa.setDescricao(pessoaDTO.getDescricao());
+        pessoa.setCienciaResponsabilidade(pessoaDTO.isCienciaResponsabilidade());
         pessoa.setUsuarioId(userId);
 
         try {
             Pessoa criada = pessoaService.create(pessoa);
-            log.info("[AUDIT] Perfil criado com sucesso - userId={}, aceitouTermos={}", userId, true);
+            log.info("[AUDIT] Perfil criado com sucesso - userId={}", userId);
             return ResponseEntity.ok(criada);
         } catch (RuntimeException e) {
             log.error("[AUDIT] Erro ao criar perfil - userId={}, erro={}", userId, e.getMessage());
@@ -142,10 +133,6 @@ public class PessoaController {
         }
     }
 
-    /**
-     * Retorna o perfil COMPLETO do usuário autenticado (com imagens e redes sociais).
-     * ✅ Retorna PessoaCompletaDTO com todas as informações
-     */
     @GetMapping("/me")
     @Operation(summary = "Obter meu perfil completo")
     @ApiResponses({
@@ -165,9 +152,6 @@ public class PessoaController {
         return ResponseEntity.ok(pessoaCompleta);
     }
 
-    /**
-     * Atualiza o perfil do usuário autenticado.
-     */
     @PutMapping("/me")
     @Operation(summary = "Atualizar meu perfil")
     @ApiResponses({
@@ -176,7 +160,7 @@ public class PessoaController {
             @ApiResponse(responseCode = "404", description = "Perfil não encontrado")
     })
     public ResponseEntity<?> updateMe(
-            @RequestBody @Valid Pessoa pessoa,
+            @RequestBody @Valid PessoaPerfilDTO pessoaDTO,  // ✅ MUDOU PARA DTO
             HttpServletRequest request) {
 
         String userId = SecurityUtils.getUserIdOrThrow(request);
@@ -186,11 +170,19 @@ public class PessoaController {
             return ResponseEntity.notFound().build();
         }
 
-        pessoa.setId(existing.getId());
-        pessoa.setUsuarioId(userId);
+        // Atualiza só os campos que vieram
+        if (pessoaDTO.getNome() != null) existing.setNome(pessoaDTO.getNome());
+        if (pessoaDTO.getCurso() != null) existing.setCurso(pessoaDTO.getCurso());
+        if (pessoaDTO.getDataNasc() != null) existing.setDataNasc(pessoaDTO.getDataNasc());
+        if (pessoaDTO.getGenero() != null) existing.setGenero(pessoaDTO.getGenero());
+        if (pessoaDTO.getInteresse() != null) existing.setInteresse(pessoaDTO.getInteresse());
+        if (pessoaDTO.getDescricao() != null) existing.setDescricao(pessoaDTO.getDescricao());
+
+        // ✅ IGNORA tags por enquanto para não causar erro
+        // (se precisar atualizar tags, faz depois)
 
         try {
-            Pessoa atualizada = pessoaService.update(pessoa);
+            Pessoa atualizada = pessoaService.update(existing);
             log.info("[AUDIT] Perfil atualizado - userId={}", userId);
             return ResponseEntity.ok(atualizada);
         } catch (RuntimeException e) {
@@ -200,9 +192,6 @@ public class PessoaController {
         }
     }
 
-    /**
-     * Marca ciência de responsabilidade do usuário autenticado.
-     */
     @PatchMapping("/me/ciencia-responsabilidade")
     @Operation(summary = "Marcar ciência de responsabilidade")
     @ApiResponses({
@@ -229,9 +218,6 @@ public class PessoaController {
         }
     }
 
-    /**
-     * Deleta o perfil do usuário autenticado.
-     */
     @DeleteMapping("/me")
     @Operation(summary = "Deletar meu perfil")
     @ApiResponses({
