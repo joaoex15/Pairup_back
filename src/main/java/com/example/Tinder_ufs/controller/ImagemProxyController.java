@@ -10,10 +10,12 @@ import com.example.Tinder_ufs.service.PessoaService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
-import java.util.Set;
+import java.time.Duration;
 import java.util.regex.Pattern;
 
 @Slf4j
@@ -26,17 +28,17 @@ public class ImagemProxyController {
     private final PessoaService pessoaService;
     private final MatchService matchService;
     private final AuditLogService auditLogService;
+    private final S3Presigner s3Presigner;
 
-    private static final Set<String> MIME_ACEITOS = Set.of(
-            "image/jpeg", "image/png", "image/webp", "image/gif"
-    );
+    @Value("${RAILWAY_BUCKET_NAME}")
+    private String bucketName;
 
     private static final Pattern PUBLIC_ID_PATTERN = Pattern.compile(
             "^[a-zA-Z0-9][a-zA-Z0-9_/\\-]{3,150}\\.[a-z]{2,5}$"
     );
 
     @GetMapping("/**")
-    public ResponseEntity<byte[]> proxyImagemHandler(HttpServletRequest request) {
+    public ResponseEntity<Void> proxyImagemHandler(HttpServletRequest request) {
         String fullPath = request.getRequestURI();
         String publicId = fullPath.replace("/api/imagens/proxy/", "");
 
@@ -54,7 +56,7 @@ public class ImagemProxyController {
         return proxyImagem(publicId, request);
     }
 
-    private ResponseEntity<byte[]> proxyImagem(String publicId, HttpServletRequest request) {
+    private ResponseEntity<Void> proxyImagem(String publicId, HttpServletRequest request) {
         try {
             String userId = SecurityUtils.getUserIdOrThrow(request);
 
@@ -95,24 +97,20 @@ public class ImagemProxyController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
 
-            byte[] imageBytes = imagemService.downloadImagem(publicId);
-            if (imageBytes == null || imageBytes.length == 0) {
-                log.error("Falha ao baixar imagem do S3: {}", publicId);
-                return ResponseEntity.notFound().build();
-            }
+            String presignedUrl = s3Presigner.presignGetObject(r -> r
+                    .signatureDuration(Duration.ofHours(1))
+                    .getObjectRequest(g -> g
+                            .bucket(bucketName)
+                            .key(publicId)))
+                    .url().toString();
 
-            String mimeType = imagem.getMimeType();
-            if (mimeType == null || !MIME_ACEITOS.contains(mimeType)) {
-                mimeType = "image/jpeg";
-            }
-
+            log.info("Redirecionando para presigned URL - publicId: {}", publicId);
             auditLogService.logImageAccess(userId, publicId, "PROXY_ACCESS");
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.parseMediaType(mimeType));
-            headers.setCacheControl("private, max-age=3600");
-
-            return new ResponseEntity<>(imageBytes, headers, HttpStatus.OK);
+            return ResponseEntity.status(HttpStatus.FOUND)
+                    .header(HttpHeaders.LOCATION, presignedUrl)
+                    .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                    .build();
 
         } catch (Exception e) {
             log.error("Erro no proxy: {}", e.getMessage(), e);
@@ -122,7 +120,6 @@ public class ImagemProxyController {
 
     private boolean isPathTraversal(String path) {
         if (path == null) return true;
-        // toLowerCase() unifica a detecção de variações de case (%2e cobre %2E também)
         String lowerPath = path.toLowerCase();
         return lowerPath.contains("..") ||
                 lowerPath.contains("./") ||
@@ -147,5 +144,4 @@ public class ImagemProxyController {
         return PUBLIC_ID_PATTERN.matcher(publicId).matches() ||
                 publicId.matches("^tinder_ufs/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+\\.[a-z]{2,5}$");
     }
-
 }
