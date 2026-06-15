@@ -8,10 +8,7 @@ import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.DBRef;
 import org.springframework.data.mongodb.core.mapping.Document;
 
-// ✅ MUDE DE javax.validation PARA jakarta.validation
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
-
 import java.time.LocalDateTime;
 
 @Document(collection = "imagem")
@@ -27,12 +24,11 @@ public class Imagem {
     private Pessoa pessoa;
 
     @NotBlank(message = "URL é obrigatória")
-    @Pattern(regexp = "^https://res\\.cloudinary\\.com/.*", message = "URL inválida do Cloudinary")
     private String url;
 
     @NotBlank(message = "PublicId é obrigatório")
     @Indexed(unique = true)
-    private String publicId;
+    private String publicId; // key S3: tinder_ufs/{pessoaId}/{uuid}.{ext}
 
     @NotBlank(message = "FolderPath é obrigatório")
     private String folderPath;
@@ -47,7 +43,6 @@ public class Imagem {
 
     private boolean ativa = true;
 
-    // No construtor da classe Imagem, garantir que tamanhoBytes seja long
     public Imagem(Pessoa pessoa, String url, String publicId, String folderPath,
                   boolean perfil, long tamanhoBytes, String mimeType) {
         this.pessoa = pessoa;
@@ -55,7 +50,7 @@ public class Imagem {
         this.publicId = publicId;
         this.folderPath = folderPath;
         this.perfil = perfil;
-        this.tamanhoBytes = tamanhoBytes;  // ← deve ser long
+        this.tamanhoBytes = tamanhoBytes;
         this.mimeType = mimeType;
         this.dataUpload = LocalDateTime.now();
         this.ativa = true;

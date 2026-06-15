@@ -11,16 +11,6 @@ import java.time.LocalDateTime;
 @RequiredArgsConstructor
 public class AuditLogService {
 
-    public void logImageUpload(String userId, String imageId, boolean isProfile) {
-        log.info("AUDIT - Usuário {} fez upload da imagem {} (perfil: {}) em {}",
-                userId, imageId, isProfile, LocalDateTime.now());
-    }
-
-    public void logImageDeletion(String userId, String imageId) {
-        log.warn("AUDIT - Usuário {} deletou a imagem {} em {}",
-                userId, imageId, LocalDateTime.now());
-    }
-
     public void logSecurityViolation(String userId, String action) {
         log.error("SECURITY VIOLATION - Usuário {} tentou: {} em {}",
                 userId, action, LocalDateTime.now());
