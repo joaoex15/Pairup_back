@@ -10,18 +10,9 @@ import com.example.Tinder_ufs.service.PessoaService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
-import software.amazon.awssdk.services.s3.model.GetObjectRequest;
-import software.amazon.awssdk.services.s3.presigner.S3Presigner;
-import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.time.Duration;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -35,10 +26,6 @@ public class ImagemProxyController {
     private final PessoaService pessoaService;
     private final MatchService matchService;
     private final AuditLogService auditLogService;
-    private final S3Presigner s3Presigner;
-
-    @Value("${RAILWAY_BUCKET_NAME}")
-    private String bucketName;
 
     private static final Set<String> MIME_ACEITOS = Set.of(
             "image/jpeg", "image/png", "image/webp", "image/gif"
@@ -108,12 +95,9 @@ public class ImagemProxyController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
 
-            String imageUrl = gerarPresignedUrl(publicId);
-            log.info("Presigned URL gerada para: {}", publicId);
-
-            byte[] imageBytes = downloadImage(imageUrl);
+            byte[] imageBytes = imagemService.downloadImagem(publicId);
             if (imageBytes == null || imageBytes.length == 0) {
-                log.error("Falha ao baixar imagem: {}", imageUrl);
+                log.error("Falha ao baixar imagem do S3: {}", publicId);
                 return ResponseEntity.notFound().build();
             }
 
@@ -164,43 +148,4 @@ public class ImagemProxyController {
                 publicId.matches("^tinder_ufs/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+\\.[a-z]{2,5}$");
     }
 
-    private String gerarPresignedUrl(String key) {
-        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
-                .bucket(bucketName)
-                .key(key)
-                .build();
-
-        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
-                .signatureDuration(Duration.ofMinutes(10))
-                .getObjectRequest(getObjectRequest)
-                .build();
-
-        return s3Presigner.presignGetObject(presignRequest).url().toString();
-    }
-
-    private byte[] downloadImage(String imageUrl) throws Exception {
-        HttpURLConnection connection = (HttpURLConnection) new URL(imageUrl).openConnection();
-        connection.setRequestMethod("GET");
-        connection.setConnectTimeout(10000);
-        connection.setReadTimeout(10000);
-        connection.setRequestProperty("User-Agent", "TinderUfs/1.0");
-
-        int responseCode = connection.getResponseCode();
-        if (responseCode != HttpURLConnection.HTTP_OK) {
-            log.error("Download falhou. HTTP Status: {}", responseCode);
-            return null;
-        }
-
-        try (InputStream inputStream = connection.getInputStream();
-             ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
-            byte[] buffer = new byte[8192];
-            int bytesRead;
-            while ((bytesRead = inputStream.read(buffer)) != -1) {
-                outputStream.write(buffer, 0, bytesRead);
-            }
-            byte[] result = outputStream.toByteArray();
-            log.info("Imagem baixada: {} bytes", result.length);
-            return result;
-        }
-    }
 }
