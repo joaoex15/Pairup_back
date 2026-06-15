@@ -57,7 +57,7 @@ public class ImagemService {
 
         String extensao = getExtensao(file.getOriginalFilename());
         String key = "tinder_ufs/" + pessoaId + "/" + UUID.randomUUID() + "." + extensao;
-        String url  = publicUrl + "/" + key;
+        String url  = publicUrl + "/" + bucketName + "/" + key;
 
         try {
             PutObjectRequest request = PutObjectRequest.builder()
