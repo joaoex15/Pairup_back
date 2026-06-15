@@ -92,7 +92,8 @@ public class SecurityConfig {
                 "http://localhost:3000",
                 "http://localhost:8080",
                 "https://pairup-flax.vercel.app",
-                "https://pairup-production-b9ee.up.railway.app"
+                "https://pairup-production-b9ee.up.railway.app",
+                "https://pairup-qg4ylvn4m-joaoex15s-projects.vercel.app"
         ));
 
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
