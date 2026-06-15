@@ -13,11 +13,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.time.Duration;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -31,9 +35,10 @@ public class ImagemProxyController {
     private final PessoaService pessoaService;
     private final MatchService matchService;
     private final AuditLogService auditLogService;
+    private final S3Presigner s3Presigner;
 
-    @Value("${RAILWAY_BUCKET_PUBLIC_URL}")
-    private String bucketPublicUrl;
+    @Value("${RAILWAY_BUCKET_NAME}")
+    private String bucketName;
 
     private static final Set<String> MIME_ACEITOS = Set.of(
             "image/jpeg", "image/png", "image/webp", "image/gif"
@@ -103,14 +108,8 @@ public class ImagemProxyController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
 
-            String imageUrl = bucketPublicUrl + "/" + publicId;
-            log.info("URL gerada: {}", imageUrl);
-
-            // Garante que a URL pertence ao nosso bucket, evitando SSRF
-            if (!imageUrl.startsWith(bucketPublicUrl)) {
-                log.error("URL fora do domínio permitido: {}", imageUrl);
-                return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
-            }
+            String imageUrl = gerarPresignedUrl(publicId);
+            log.info("Presigned URL gerada para: {}", publicId);
 
             byte[] imageBytes = downloadImage(imageUrl);
             if (imageBytes == null || imageBytes.length == 0) {
@@ -163,6 +162,20 @@ public class ImagemProxyController {
         if (isPathTraversal(publicId)) return false;
         return PUBLIC_ID_PATTERN.matcher(publicId).matches() ||
                 publicId.matches("^tinder_ufs/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+\\.[a-z]{2,5}$");
+    }
+
+    private String gerarPresignedUrl(String key) {
+        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                .bucket(bucketName)
+                .key(key)
+                .build();
+
+        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofMinutes(10))
+                .getObjectRequest(getObjectRequest)
+                .build();
+
+        return s3Presigner.presignGetObject(presignRequest).url().toString();
     }
 
     private byte[] downloadImage(String imageUrl) throws Exception {
