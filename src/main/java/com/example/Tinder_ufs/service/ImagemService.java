@@ -11,11 +11,16 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 
@@ -27,9 +32,14 @@ public class ImagemService {
     private final ImagemRepository imagemRepository;
     private final PessoaRepository pessoaRepository;
     private final ImageCompressionUtil imageCompressionUtil;
+    private final S3Client s3Client;
+    private final S3Presigner s3Presigner;
 
-    @Value("${STORAGE_PATH:/storage}")
-    private String storagePath;
+    @Value("${cloudflare.r2.bucket}")
+    private String bucket;
+
+    @Value("${cloudflare.r2.public-url:}")
+    private String publicUrl;
 
     @Transactional
     public Imagem salvarImagem(MultipartFile file, String pessoaId, boolean isPerfil) throws IOException {
@@ -51,11 +61,16 @@ public class ImagemService {
 
         String extensao = getExtensao(file.getOriginalFilename());
         String key = "tinder_ufs/" + pessoaId + "/" + UUID.randomUUID() + "." + extensao;
+        String contentType = file.getContentType() != null ? file.getContentType() : "image/jpeg";
 
-        Path filePath = Paths.get(storagePath, key);
-        Files.createDirectories(filePath.getParent());
-        Files.write(filePath, imagemComprimida);
-        log.info("Imagem gravada no volume: {}", filePath);
+        PutObjectRequest putRequest = PutObjectRequest.builder()
+                .bucket(bucket)
+                .key(key)
+                .contentType(contentType)
+                .contentLength((long) imagemComprimida.length)
+                .build();
+        s3Client.putObject(putRequest, RequestBody.fromBytes(imagemComprimida));
+        log.info("Imagem enviada para R2: {}", key);
 
         if (isPerfil) {
             imagemRepository.findByPessoaIdAndPerfilTrue(pessoaId)
@@ -67,7 +82,7 @@ public class ImagemService {
         }
 
         String folderPath = key.substring(0, key.lastIndexOf('/'));
-        String url = "/api/imagens/proxy/" + key;
+        String url = resolverUrl(key);
 
         Imagem imagem = new Imagem(
                 pessoa,
@@ -76,7 +91,7 @@ public class ImagemService {
                 folderPath,
                 isPerfil,
                 (long) imagemComprimida.length,
-                file.getContentType()
+                contentType
         );
         imagem.setId(UUID.randomUUID().toString());
 
@@ -102,16 +117,28 @@ public class ImagemService {
         }
 
         try {
-            Path filePath = Paths.get(storagePath, imagem.getPublicId());
-            Files.deleteIfExists(filePath);
-            log.info("Arquivo removido do volume: {}", filePath);
-        } catch (IOException e) {
-            log.error("Erro ao remover arquivo do volume: {}", e.getMessage());
+            DeleteObjectRequest deleteRequest = DeleteObjectRequest.builder()
+                    .bucket(bucket)
+                    .key(imagem.getPublicId())
+                    .build();
+            s3Client.deleteObject(deleteRequest);
+            log.info("Arquivo removido do R2: {}", imagem.getPublicId());
+        } catch (Exception e) {
+            log.error("Erro ao remover arquivo do R2: {}", e.getMessage());
         }
 
         imagem.setAtiva(false);
         imagemRepository.save(imagem);
         log.info("Imagem {} marcada como inativa no banco", imagemId);
+    }
+
+    public String gerarUrlPresignada(String publicId) {
+        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofHours(1))
+                .getObjectRequest(req -> req.bucket(bucket).key(publicId))
+                .build();
+        PresignedGetObjectRequest presigned = s3Presigner.presignGetObject(presignRequest);
+        return presigned.url().toString();
     }
 
     @Transactional(readOnly = true)
@@ -152,6 +179,13 @@ public class ImagemService {
 
         log.info("Foto de perfil atualizada para imagem: {}", imagemId);
         return imagem;
+    }
+
+    private String resolverUrl(String key) {
+        if (publicUrl != null && !publicUrl.isBlank()) {
+            return publicUrl + "/" + key;
+        }
+        return "/api/imagens/proxy/" + key;
     }
 
     private void validarArquivo(MultipartFile file) {

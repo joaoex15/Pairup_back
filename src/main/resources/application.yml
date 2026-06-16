@@ -49,14 +49,13 @@ jwt:
   expiration: 86400000
   refresh-expiration: 604800000
 
-railway:
-  bucket:
-    endpoint: ${RAILWAY_BUCKET_ENDPOINT}
-    access-key: ${RAILWAY_BUCKET_ACCESS_KEY}
-    secret-key: ${RAILWAY_BUCKET_SECRET_KEY}
-    region: ${RAILWAY_BUCKET_REGION:us-east-1}
-    name: ${RAILWAY_BUCKET_NAME}
-    public-url: ${RAILWAY_BUCKET_PUBLIC_URL}
+cloudflare:
+  r2:
+    endpoint: ${CF_R2_ENDPOINT}
+    access-key: ${CF_R2_ACCESS_KEY}
+    secret-key: ${CF_R2_SECRET_KEY}
+    bucket: ${CF_R2_BUCKET}
+    public-url: ${CF_R2_PUBLIC_URL:}
 
 file:
   compress:

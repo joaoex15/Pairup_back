@@ -11,6 +11,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -108,6 +109,28 @@ public class ImagemController {
             log.error("Erro interno: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(ImagemUploadResponseDTO.error("Erro ao deletar imagem: " + e.getMessage()));
+        }
+    }
+
+    @GetMapping("/proxy/**")
+    public ResponseEntity<Void> proxyImagem(HttpServletRequest request) {
+        try {
+            String uri = request.getRequestURI();
+            String prefix = "/api/imagens/proxy/";
+            int idx = uri.indexOf(prefix);
+            if (idx == -1) {
+                return ResponseEntity.badRequest().build();
+            }
+            String publicId = uri.substring(idx + prefix.length());
+
+            String presignedUrl = imagemService.gerarUrlPresignada(publicId);
+
+            return ResponseEntity.status(HttpStatus.FOUND)
+                    .header(HttpHeaders.LOCATION, presignedUrl)
+                    .build();
+        } catch (Exception e) {
+            log.error("Erro ao gerar URL para imagem: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
     }
 

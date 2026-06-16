@@ -45,10 +45,12 @@ services:
       # JWT
       JWT_SECRET: ${JWT_SECRET}
 
-      # Cloudinary
-      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
-      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
-      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
+      # Cloudflare R2
+      CF_R2_ENDPOINT: ${CF_R2_ENDPOINT}
+      CF_R2_ACCESS_KEY: ${CF_R2_ACCESS_KEY}
+      CF_R2_SECRET_KEY: ${CF_R2_SECRET_KEY}
+      CF_R2_BUCKET: ${CF_R2_BUCKET}
+      CF_R2_PUBLIC_URL: ${CF_R2_PUBLIC_URL:-}
 
       # Google OAuth2
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
@@ -71,8 +73,6 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./tokens:/app/tokens
-      - ./src/main/resources/google-drive-credentials.json:/app/resources/google-drive-credentials.json:ro
-      - ./uploads:/app/uploads
     networks:
       - tinder_net
     healthcheck:
