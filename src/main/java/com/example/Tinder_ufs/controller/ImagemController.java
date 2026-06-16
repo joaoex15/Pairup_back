@@ -54,6 +54,7 @@ public class ImagemController {
                     imagem,
                     uploadDTO.getFile().getOriginalFilename()
             );
+            response.setUrl("/api/imagens/proxy/" + imagem.getPublicId());
 
             return ResponseEntity.ok(response);
 
@@ -128,7 +129,7 @@ public class ImagemController {
                     .map(img -> {
                         ImagemUploadResponseDTO dto = new ImagemUploadResponseDTO();
                         dto.setId(img.getId());
-                        dto.setUrl(img.getUrl());
+                        dto.setUrl("/api/imagens/proxy/" + img.getPublicId());
                         dto.setPerfil(img.isPerfil());
                         dto.setTamanhoBytes(img.getTamanhoBytes());
                         dto.setSucesso(true);
