@@ -16,8 +16,14 @@ import org.springframework.web.bind.annotation.*;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.time.Duration;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 @Slf4j
@@ -35,12 +41,16 @@ public class ImagemProxyController {
     @Value("${RAILWAY_BUCKET_NAME}")
     private String bucketName;
 
+    private static final Set<String> MIME_ACEITOS = Set.of(
+            "image/jpeg", "image/png", "image/webp", "image/gif"
+    );
+
     private static final Pattern PUBLIC_ID_PATTERN = Pattern.compile(
             "^[a-zA-Z0-9][a-zA-Z0-9_/\\-]{3,150}\\.[a-z]{2,5}$"
     );
 
     @GetMapping("/**")
-    public ResponseEntity<Void> proxyImagemHandler(HttpServletRequest request) {
+    public ResponseEntity<byte[]> proxyImagemHandler(HttpServletRequest request) {
         String fullPath = request.getRequestURI();
         String publicId = fullPath.replace("/api/imagens/proxy/", "");
 
@@ -58,7 +68,7 @@ public class ImagemProxyController {
         return proxyImagem(publicId, request);
     }
 
-    private ResponseEntity<Void> proxyImagem(String publicId, HttpServletRequest request) {
+    private ResponseEntity<byte[]> proxyImagem(String publicId, HttpServletRequest request) {
         try {
             String userId = SecurityUtils.getUserIdOrThrow(request);
 
@@ -99,29 +109,68 @@ public class ImagemProxyController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
 
-            GetObjectRequest getObjectRequest = GetObjectRequest.builder()
-                    .bucket(bucketName)
-                    .key(publicId)
-                    .build();
+            byte[] imageBytes = downloadImageFromBucket(publicId);
+            if (imageBytes == null || imageBytes.length == 0) {
+                log.error("Falha ao baixar imagem do bucket: {}", publicId);
+                return ResponseEntity.notFound().build();
+            }
 
-            GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
-                    .signatureDuration(Duration.ofMinutes(60))
-                    .getObjectRequest(getObjectRequest)
-                    .build();
+            String mimeType = imagem.getMimeType();
+            if (mimeType == null || !MIME_ACEITOS.contains(mimeType)) {
+                mimeType = "image/jpeg";
+            }
 
-            String presignedUrl = s3Presigner.presignGetObject(presignRequest)
-                    .url().toString();
-
-            log.info("Presigned URL gerada para publicId: {}", publicId);
             auditLogService.logImageAccess(userId, publicId, "PROXY_ACCESS");
 
-            return ResponseEntity.status(HttpStatus.FOUND)
-                    .header(HttpHeaders.LOCATION, presignedUrl)
-                    .build();
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.parseMediaType(mimeType));
+            headers.setCacheControl("private, max-age=3600");
+
+            return new ResponseEntity<>(imageBytes, headers, HttpStatus.OK);
 
         } catch (Exception e) {
             log.error("Erro no proxy: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    private byte[] downloadImageFromBucket(String publicId) throws Exception {
+        GetObjectRequest getObj = GetObjectRequest.builder()
+                .bucket(bucketName)
+                .key(publicId)
+                .build();
+
+        PresignedGetObjectRequest presigned = s3Presigner.presignGetObject(
+                GetObjectPresignRequest.builder()
+                        .signatureDuration(Duration.ofMinutes(15))
+                        .getObjectRequest(getObj)
+                        .build()
+        );
+
+        String presignedUrl = presigned.url().toString();
+        log.debug("Presigned URL gerada internamente para: {}", publicId);
+
+        HttpURLConnection connection = (HttpURLConnection) new URL(presignedUrl).openConnection();
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(10_000);
+        connection.setReadTimeout(10_000);
+
+        int status = connection.getResponseCode();
+        if (status != HttpURLConnection.HTTP_OK) {
+            log.error("Download do bucket falhou. HTTP {}: {}", status, publicId);
+            return null;
+        }
+
+        try (InputStream in = connection.getInputStream();
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+            byte[] result = out.toByteArray();
+            log.info("Imagem baixada do bucket: {} bytes ({})", result.length, publicId);
+            return result;
         }
     }
 
