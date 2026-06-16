@@ -13,7 +13,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 
 import java.time.Duration;
 import java.util.regex.Pattern;
@@ -97,19 +99,24 @@ public class ImagemProxyController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
 
-            String presignedUrl = s3Presigner.presignGetObject(r -> r
-                    .signatureDuration(Duration.ofHours(1))
-                    .getObjectRequest(g -> g
-                            .bucket(bucketName)
-                            .key(publicId)))
+            GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(publicId)
+                    .build();
+
+            GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                    .signatureDuration(Duration.ofMinutes(60))
+                    .getObjectRequest(getObjectRequest)
+                    .build();
+
+            String presignedUrl = s3Presigner.presignGetObject(presignRequest)
                     .url().toString();
 
-            log.info("Redirecionando para presigned URL - publicId: {}", publicId);
+            log.info("Presigned URL gerada para publicId: {}", publicId);
             auditLogService.logImageAccess(userId, publicId, "PROXY_ACCESS");
 
             return ResponseEntity.status(HttpStatus.FOUND)
                     .header(HttpHeaders.LOCATION, presignedUrl)
-                    .header(HttpHeaders.CACHE_CONTROL, "no-store")
                     .build();
 
         } catch (Exception e) {
