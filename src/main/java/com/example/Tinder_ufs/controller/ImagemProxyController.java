@@ -10,14 +10,11 @@ import com.example.Tinder_ufs.service.PessoaService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -32,9 +29,6 @@ public class ImagemProxyController {
     private final MatchService matchService;
     private final AuditLogService auditLogService;
 
-    @Value("${STORAGE_PATH:/storage}")
-    private String storagePath;
-
     private static final Set<String> MIME_ACEITOS = Set.of(
             "image/jpeg", "image/png", "image/webp", "image/gif"
     );
@@ -44,7 +38,7 @@ public class ImagemProxyController {
     );
 
     @GetMapping("/**")
-    public ResponseEntity<byte[]> proxyImagemHandler(HttpServletRequest request) {
+    public ResponseEntity<Void> proxyImagemHandler(HttpServletRequest request) {
         String fullPath = request.getRequestURI();
         String publicId = fullPath.replace("/api/imagens/proxy/", "");
 
@@ -62,7 +56,7 @@ public class ImagemProxyController {
         return proxyImagem(publicId, request);
     }
 
-    private ResponseEntity<byte[]> proxyImagem(String publicId, HttpServletRequest request) {
+    private ResponseEntity<Void> proxyImagem(String publicId, HttpServletRequest request) {
         try {
             String userId = SecurityUtils.getUserIdOrThrow(request);
 
@@ -103,46 +97,19 @@ public class ImagemProxyController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
 
-            byte[] imageBytes = readImageFromDisk(publicId);
-            if (imageBytes == null || imageBytes.length == 0) {
-                log.error("Arquivo não encontrado no volume: {}", publicId);
-                return ResponseEntity.notFound().build();
-            }
-
-            String mimeType = imagem.getMimeType();
-            if (mimeType == null || !MIME_ACEITOS.contains(mimeType)) {
-                mimeType = "image/jpeg";
-            }
-
             auditLogService.logImageAccess(userId, publicId, "PROXY_ACCESS");
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.parseMediaType(mimeType));
-            headers.setCacheControl("private, max-age=3600");
+            String presignedUrl = imagemService.gerarUrlPresignada(publicId);
 
-            return new ResponseEntity<>(imageBytes, headers, HttpStatus.OK);
+            return ResponseEntity.status(HttpStatus.FOUND)
+                    .header(HttpHeaders.LOCATION, presignedUrl)
+                    .header(HttpHeaders.CACHE_CONTROL, "private, max-age=3600")
+                    .build();
 
         } catch (Exception e) {
             log.error("Erro no proxy: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
-    }
-
-    private byte[] readImageFromDisk(String publicId) throws IOException {
-        Path base   = Paths.get(storagePath).toAbsolutePath().normalize();
-        Path target = base.resolve(publicId).normalize();
-
-        if (!target.startsWith(base)) {
-            log.warn("[SECURITY] Path fora do volume detectado: {}", publicId);
-            return null;
-        }
-
-        if (!Files.exists(target)) {
-            log.warn("Arquivo não existe no volume: {}", target);
-            return null;
-        }
-
-        return Files.readAllBytes(target);
     }
 
     private boolean isPathTraversal(String path) {
