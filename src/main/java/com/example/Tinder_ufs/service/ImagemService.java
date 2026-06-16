@@ -11,32 +11,25 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
-import software.amazon.awssdk.core.sync.RequestBody;
-import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
-import software.amazon.awssdk.services.s3.model.GetObjectRequest;
-import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.UUID;
-
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ImagemService {
 
-    private final S3Client s3Client;
     private final ImagemRepository imagemRepository;
     private final PessoaRepository pessoaRepository;
     private final ImageCompressionUtil imageCompressionUtil;
 
-    @Value("${RAILWAY_BUCKET_NAME}")
-    private String bucketName;
-
-    @Value("${RAILWAY_BUCKET_PUBLIC_URL}")
-    private String publicUrl;
+    @Value("${STORAGE_PATH:/storage}")
+    private String storagePath;
 
     @Transactional
     public Imagem salvarImagem(MultipartFile file, String pessoaId, boolean isPerfil) throws IOException {
@@ -58,22 +51,11 @@ public class ImagemService {
 
         String extensao = getExtensao(file.getOriginalFilename());
         String key = "tinder_ufs/" + pessoaId + "/" + UUID.randomUUID() + "." + extensao;
-        String url  = publicUrl + "/" + bucketName + "/" + key;
 
-        try {
-            PutObjectRequest request = PutObjectRequest.builder()
-                    .bucket(bucketName)
-                    .key(key)
-                    .contentType(file.getContentType())
-                    .build();
-
-            s3Client.putObject(request, RequestBody.fromBytes(imagemComprimida));
-            log.info("Upload S3 realizado. Key: {}, URL: {}", key, url);
-
-        } catch (Exception e) {
-            log.error("Erro no upload para Railway Bucket: {}", e.getMessage());
-            throw new IOException("Erro ao fazer upload da imagem: " + e.getMessage(), e);
-        }
+        Path filePath = Paths.get(storagePath, key);
+        Files.createDirectories(filePath.getParent());
+        Files.write(filePath, imagemComprimida);
+        log.info("Imagem gravada no volume: {}", filePath);
 
         if (isPerfil) {
             imagemRepository.findByPessoaIdAndPerfilTrue(pessoaId)
@@ -85,6 +67,7 @@ public class ImagemService {
         }
 
         String folderPath = key.substring(0, key.lastIndexOf('/'));
+        String url = "/api/imagens/proxy/" + key;
 
         Imagem imagem = new Imagem(
                 pessoa,
@@ -95,12 +78,10 @@ public class ImagemService {
                 (long) imagemComprimida.length,
                 file.getContentType()
         );
-        // O construtor já define dataUpload e ativa; o ID precisa ser explícito para usar UUID
         imagem.setId(UUID.randomUUID().toString());
 
         Imagem saved = imagemRepository.save(imagem);
         log.info("Imagem salva no banco com ID: {}", saved.getId());
-
         return saved;
     }
 
@@ -121,17 +102,11 @@ public class ImagemService {
         }
 
         try {
-            DeleteObjectRequest deleteRequest = DeleteObjectRequest.builder()
-                    .bucket(bucketName)
-                    .key(imagem.getPublicId())
-                    .build();
-
-            s3Client.deleteObject(deleteRequest);
-            log.info("Imagem apagada do S3: {}", imagem.getPublicId());
-
-        } catch (Exception e) {
-            // Mesmo com erro no S3, prossegue com o soft delete no banco
-            log.error("Erro ao apagar do Railway Bucket: {}", e.getMessage());
+            Path filePath = Paths.get(storagePath, imagem.getPublicId());
+            Files.deleteIfExists(filePath);
+            log.info("Arquivo removido do volume: {}", filePath);
+        } catch (IOException e) {
+            log.error("Erro ao remover arquivo do volume: {}", e.getMessage());
         }
 
         imagem.setAtiva(false);
@@ -177,15 +152,6 @@ public class ImagemService {
 
         log.info("Foto de perfil atualizada para imagem: {}", imagemId);
         return imagem;
-    }
-
-    @Transactional(readOnly = true)
-    public byte[] downloadImagem(String publicId) {
-        GetObjectRequest request = GetObjectRequest.builder()
-                .bucket(bucketName)
-                .key(publicId)
-                .build();
-        return s3Client.getObjectAsBytes(request).asByteArray();
     }
 
     private void validarArquivo(MultipartFile file) {

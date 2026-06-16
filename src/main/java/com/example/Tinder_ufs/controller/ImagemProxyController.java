@@ -13,16 +13,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
-import software.amazon.awssdk.services.s3.model.GetObjectRequest;
-import software.amazon.awssdk.services.s3.presigner.S3Presigner;
-import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
-import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.time.Duration;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -36,10 +31,9 @@ public class ImagemProxyController {
     private final PessoaService pessoaService;
     private final MatchService matchService;
     private final AuditLogService auditLogService;
-    private final S3Presigner s3Presigner;
 
-    @Value("${RAILWAY_BUCKET_NAME}")
-    private String bucketName;
+    @Value("${STORAGE_PATH:/storage}")
+    private String storagePath;
 
     private static final Set<String> MIME_ACEITOS = Set.of(
             "image/jpeg", "image/png", "image/webp", "image/gif"
@@ -109,9 +103,9 @@ public class ImagemProxyController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
 
-            byte[] imageBytes = downloadImageFromBucket(publicId);
+            byte[] imageBytes = readImageFromDisk(publicId);
             if (imageBytes == null || imageBytes.length == 0) {
-                log.error("Falha ao baixar imagem do bucket: {}", publicId);
+                log.error("Arquivo não encontrado no volume: {}", publicId);
                 return ResponseEntity.notFound().build();
             }
 
@@ -134,44 +128,21 @@ public class ImagemProxyController {
         }
     }
 
-    private byte[] downloadImageFromBucket(String publicId) throws Exception {
-        GetObjectRequest getObj = GetObjectRequest.builder()
-                .bucket(bucketName)
-                .key(publicId)
-                .build();
+    private byte[] readImageFromDisk(String publicId) throws IOException {
+        Path base   = Paths.get(storagePath).toAbsolutePath().normalize();
+        Path target = base.resolve(publicId).normalize();
 
-        PresignedGetObjectRequest presigned = s3Presigner.presignGetObject(
-                GetObjectPresignRequest.builder()
-                        .signatureDuration(Duration.ofMinutes(15))
-                        .getObjectRequest(getObj)
-                        .build()
-        );
-
-        String presignedUrl = presigned.url().toString();
-        log.debug("Presigned URL gerada internamente para: {}", publicId);
-
-        HttpURLConnection connection = (HttpURLConnection) new URL(presignedUrl).openConnection();
-        connection.setRequestMethod("GET");
-        connection.setConnectTimeout(10_000);
-        connection.setReadTimeout(10_000);
-
-        int status = connection.getResponseCode();
-        if (status != HttpURLConnection.HTTP_OK) {
-            log.error("Download do bucket falhou. HTTP {}: {}", status, publicId);
+        if (!target.startsWith(base)) {
+            log.warn("[SECURITY] Path fora do volume detectado: {}", publicId);
             return null;
         }
 
-        try (InputStream in = connection.getInputStream();
-             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            byte[] buffer = new byte[8192];
-            int read;
-            while ((read = in.read(buffer)) != -1) {
-                out.write(buffer, 0, read);
-            }
-            byte[] result = out.toByteArray();
-            log.info("Imagem baixada do bucket: {} bytes ({})", result.length, publicId);
-            return result;
+        if (!Files.exists(target)) {
+            log.warn("Arquivo não existe no volume: {}", target);
+            return null;
         }
+
+        return Files.readAllBytes(target);
     }
 
     private boolean isPathTraversal(String path) {

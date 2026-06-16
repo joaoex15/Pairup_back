@@ -67,16 +67,6 @@
 			<version>2.3.0</version>
 		</dependency>
 
-		<!--
-            REMOVIDO: cloudinary-http44
-            ADICIONADO: AWS S3 SDK (compatível com Railway Bucket)
-        -->
-		<dependency>
-			<groupId>software.amazon.awssdk</groupId>
-			<artifactId>s3</artifactId>
-			<version>2.28.0</version>
-		</dependency>
-
 		<!-- JWT -->
 		<dependency>
 			<groupId>io.jsonwebtoken</groupId>
