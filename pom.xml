@@ -12,10 +12,10 @@
 	</parent>
 
 	<groupId>com.example</groupId>
-	<artifactId>Tinder_ufs</artifactId>
+	<artifactId>pairup</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>Tinder_ufs</name>
-	<description>Tinder UFS - Projeto</description>
+	<name>pairup</name>
+	<description>PairUp - Projeto</description>
 
 	<properties>
 		<java.version>21</java.version>

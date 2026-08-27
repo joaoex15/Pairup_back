@@ -1,9 +1,9 @@
 spring:
   application:
-    name: Tinder_ufs
+    name: pairup
   data:
     mongodb:
-      uri: ${MONGODB_URI:mongodb://localhost:27017/TINDER}
+      uri: ${MONGODB_URI:mongodb://localhost:27017/PAIRUP}
   servlet:
     multipart:
       max-file-size: 5MB
@@ -85,7 +85,7 @@ app:
 
 logging:
   level:
-    com.example.Tinder_ufs: INFO
+    com.example.pairup: INFO
     org.springframework.security: INFO
     software.amazon.awssdk: WARN
   pattern:

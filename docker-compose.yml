@@ -4,19 +4,19 @@ services:
   # ─── MongoDB principal (dados reais) ───────────────────────────────────────
   mongodb:
     image: mongo:7.0
-    container_name: tinder_ufs_mongo
+    container_name: pairup_mongo
     restart: unless-stopped
     ports:
       - "27017:27017"
     environment:
-      MONGO_INITDB_DATABASE: TINDER
+      MONGO_INITDB_DATABASE: PAIRUP
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-admin123}
     volumes:
       - mongo_data:/data/db
       - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
     networks:
-      - tinder_net
+      - pairup_net
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 10s
@@ -31,7 +31,7 @@ services:
       dockerfile: Dockerfile
       args:
         - JAR_FILE=build/libs/*.jar
-    container_name: tinder_ufs_app
+    container_name: pairup_app
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -40,7 +40,7 @@ services:
         condition: service_healthy
     environment:
       # MongoDB
-      MONGODB_URI: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-admin123}@mongodb:27017/TINDER?authSource=admin
+      MONGODB_URI: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-admin123}@mongodb:27017/PAIRUP?authSource=admin
 
       # JWT
       JWT_SECRET: ${JWT_SECRET}
@@ -74,7 +74,7 @@ services:
       - ./logs:/app/logs
       - ./tokens:/app/tokens
     networks:
-      - tinder_net
+      - pairup_net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
       interval: 30s
@@ -85,7 +85,7 @@ services:
   # ─── Redis para rate limiting (opcional) ───────────────────────────────────
   redis:
     image: redis:7.2-alpine
-    container_name: tinder_ufs_redis
+    container_name: pairup_redis
     restart: unless-stopped
     ports:
       - "6379:6379"
@@ -93,7 +93,7 @@ services:
     volumes:
       - redis_data:/data
     networks:
-      - tinder_net
+      - pairup_net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -103,7 +103,7 @@ services:
   # ─── Nginx para proxy reverso (opcional - produção) ───────────────────────
   nginx:
     image: nginx:alpine
-    container_name: tinder_ufs_nginx
+    container_name: pairup_nginx
     restart: unless-stopped
     ports:
       - "80:80"
@@ -114,7 +114,7 @@ services:
     depends_on:
       - app
     networks:
-      - tinder_net
+      - pairup_net
     profiles:
       - production
 
@@ -125,6 +125,6 @@ volumes:
     driver: local
 
 networks:
-  tinder_net:
+  pairup_net:
     driver: bridge
-    name: tinder_network
+    name: pairup_network
