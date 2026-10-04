@@ -58,21 +58,11 @@ services:
       BASE_URL: ${BASE_URL:-http://localhost:8080}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000,http://localhost:5173}
 
-      # Google Drive
-      GOOGLE_DRIVE_FOLDER_ID: ${GOOGLE_DRIVE_FOLDER_ID}
-      GOOGLE_DRIVE_CREDENTIALS_PATH: ${GOOGLE_DRIVE_CREDENTIALS_PATH:-/app/resources/google-drive-credentials.json}
-
-      # App Config
-      APP_MAX_IMAGES_PER_USER: ${APP_MAX_IMAGES_PER_USER:-10}
-      APP_MAX_FILE_SIZE_MB: ${APP_MAX_FILE_SIZE_MB:-5}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
-
       # Java Options
       JAVA_OPTS: "-Xmx512m -Xms256m -XX:+UseG1GC -Duser.timezone=UTC"
 
     volumes:
       - ./logs:/app/logs
-      - ./tokens:/app/tokens
     networks:
       - pairup_net
     healthcheck:
@@ -81,24 +71,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-
-  # ─── Redis para rate limiting (opcional) ───────────────────────────────────
-  redis:
-    image: redis:7.2-alpine
-    container_name: pairup_redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
-    volumes:
-      - redis_data:/data
-    networks:
-      - pairup_net
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   # ─── Nginx para proxy reverso (opcional - produção) ───────────────────────
   nginx:
@@ -120,8 +92,6 @@ services:
 
 volumes:
   mongo_data:
-    driver: local
-  redis_data:
     driver: local
 
 networks:

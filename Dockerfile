@@ -23,7 +23,7 @@ RUN apk add --no-cache curl
 COPY --from=build /app/target/*.jar app.jar
 
 # Cria diretórios necessários
-RUN mkdir -p /app/logs /app/uploads /app/tokens
+RUN mkdir -p /app/logs
 
 # Expõe a porta da aplicação
 EXPOSE 8080

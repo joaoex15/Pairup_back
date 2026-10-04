@@ -24,10 +24,38 @@ aqui.
 - Upload de foto de perfil com compressão e acesso via proxy autenticado (nunca a URL direta do bucket)
 - Liberação de redes sociais (Instagram/WhatsApp/Telegram) apenas entre pessoas com match ativo
 
+## Estrutura do código
+
+O código Java (`src/main/java/com/example/pairup/`) é organizado **por funcionalidade**:
+cada pacote reúne a entidade, o repositório, o service, o controller e os DTOs de uma
+mesma área do domínio. O que é transversal (usado por várias funcionalidades) fica em
+`shared/`.
+
+```
+com.example.pairup
+├── PairUpApplication.java      # @SpringBootApplication
+├── user/      # conta: User, UserRepository, UserService, UserController, LoginRequestDTO
+├── pessoa/    # perfil: Pessoa, Genero, Interesse, PessoaRepository, PessoaService,
+│              #         PessoaController, PessoaPerfilDTO, PessoaCompletaDTO
+├── match/     # likes e matches: Like, Match, LikeRepository, MatchRepository, LikeService,
+│              #         MatchService, LikeController, MatchController, PessoaRedesSociaisDTO
+├── imagem/    # fotos (R2): Imagem, ImagemRepository, ImagemService, AuditLogService,
+│              #         ImagemController, ImagemProxyController, ImagemUploadDTO,
+│              #         ImagemUploadResponseDTO, ImageCompressionUtil
+├── tag/       # Tag, TagRepository, TagService, TagController
+└── shared/
+    ├── config/     # SecurityConfig, CloudflareR2Config, OpenAPIConfig, OAuth2SuccessHandler
+    ├── security/   # JwtFilter, JwtService, CustomUserDetailsService, SecurityUtils
+    └── exception/  # GlobalExceptionHandler
+```
+
+Os testes (`src/test/java/com/example/pairup/`) seguem o mesmo pacote da funcionalidade
+que testam (ex.: `match/LikeControllerTest`, `match/MatchControllerTest`).
+
 ## Rodando o projeto
 
 ### Pré-requisitos
-- JDK 21 e Maven (ou use o wrapper `./mvnw`)
+- JDK 21 e Maven
 - Docker + Docker Compose (para rodar tudo containerizado, incluindo o MongoDB)
 
 ### Variáveis de ambiente
@@ -52,7 +80,7 @@ CF_R2_PUBLIC_URL=
 ### Local, sem Docker
 
 ```bash
-./mvnw spring-boot:run
+mvn spring-boot:run
 ```
 
 ### Com Docker Compose
@@ -61,9 +89,12 @@ CF_R2_PUBLIC_URL=
 docker-compose up
 ```
 
-Sobe MongoDB (porta `27017`, database `TINDER`) e a aplicação (porta `8080`). Os
-serviços `redis` e `nginx` no `docker-compose.yml` estão provisionados mas não são
-usados pelo código hoje (ver seção abaixo).
+Sobe MongoDB (porta `27017`, database `TINDER`) e a aplicação (porta `8080`). O
+serviço `nginx` no `docker-compose.yml` (perfil `production`, opcional) segue
+provisionado mas não é usado pelo código hoje (ver seção abaixo). O serviço `redis`
+que existia aqui foi removido: não havia nenhum cliente/dependência Redis no código
+(rate limiting nunca foi implementado, apesar das chaves `app.security.rate-limit.*`
+que existiam no `application.yml`).
 
 ### Documentação da API
 
@@ -72,7 +103,7 @@ Com a aplicação rodando: `http://localhost:8080/swagger-ui.html`
 ## Testes
 
 ```bash
-./mvnw test
+mvn test
 ```
 
 > ⚠️ No estado atual do repositório, a suíte de testes falha por completo (o contexto

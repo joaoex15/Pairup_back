@@ -46,37 +46,14 @@ server:
 
 jwt:
   secret: ${JWT_SECRET}
-  expiration: 86400000
-  refresh-expiration: 604800000
 
-railway:
-  bucket:
-    endpoint: ${RAILWAY_BUCKET_ENDPOINT}
-    access-key: ${RAILWAY_BUCKET_ACCESS_KEY}
-    secret-key: ${RAILWAY_BUCKET_SECRET_KEY}
-    region: ${RAILWAY_BUCKET_REGION:us-east-1}
-    name: ${RAILWAY_BUCKET_NAME}
-    public-url: ${RAILWAY_BUCKET_PUBLIC_URL}
-
-app:
-  security:
-    max-images-per-user: 10
-    max-file-size-mb: 5
-    allowed-image-types:
-      - image/jpeg
-      - image/png
-      - image/webp
-      - image/gif
-    rate-limit:
-      upload-per-minute: 5
-      download-per-minute: 30
-    image:
-      folder-base: tinder_ufs
-  cors:
-    allowed-origins: ${FRONTEND_URL}
-    allowed-methods: GET,POST,PUT,DELETE,OPTIONS
-    allowed-headers: "*"
-    allow-credentials: true
+cloudflare:
+  r2:
+    endpoint: http://localhost:9000
+    access-key: test-access-key
+    secret-key: test-secret-key
+    bucket: test-bucket
+    public-url: http://localhost:9000/test-bucket
 
 # Compressão de imagens (usado pelo ImageCompressionUtil)
 file:
