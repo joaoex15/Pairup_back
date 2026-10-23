@@ -54,3 +54,5 @@ GerarRefreshToken.java
 ### Sistema operacional ###
 .DS_Store
 Thumbs.db
+### Claude Code (local) ###
+.claude/

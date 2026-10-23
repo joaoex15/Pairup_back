@@ -1,0 +1,27 @@
+# Perfil "test": só o que difere do application.yml principal.
+# Valores literais (sem ${...}) para que o .env de produção, carregado pelo
+# spring-dotenv, não seja usado nos testes. Para outra porta/host, sobrescreva com
+# SPRING_DATA_MONGODB_URI ou CLOUDFLARE_R2_ENDPOINT / CLOUDFLARE_R2_PUBLIC_URL.
+spring:
+  data:
+    mongodb:
+      uri: mongodb://localhost:27018/PAIRUP_TEST
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: teste
+            client-secret: teste
+            redirect-uri: http://localhost:8080/login/oauth2/code/google
+
+jwt:
+  secret: tester-local-secret-0123456789abcdef0123456789abcdef
+
+cloudflare:
+  r2:
+    endpoint: http://localhost:9000
+    access-key: test-access-key
+    secret-key: test-secret-key
+    bucket: test-bucket
+    public-url: http://localhost:9000/test-bucket
