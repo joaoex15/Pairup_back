@@ -10,6 +10,18 @@
 > correção da interpretação do `302` de `/swagger-ui.html`, do comando de sobrescrita do S3
 > e da explicação dos containers Mongo.
 
+## Execução de 2026-11-02 — regressão do feed e documentação da API
+
+- **Resultado: 40/40** (`mvn -B clean package`), sem conexão a produção nos testes.
+- Novos: `shared/config/OpenApiDocsTest` (2 testes) e a asserção de `fotoPerfilUrl` em
+  `GET /pessoas`, em `PessoaControllerTest`. Os totais da tabela abaixo são de 2026-10-22.
+
+**Cuidado ao subir a aplicação fora dos testes:** `mvn spring-boot:run` com
+`-Dspring-boot.run.useTestClasspath=true -Dspring-boot.run.profiles=test` **não** isola o
+banco: o `spring-dotenv` ainda lê o `.env` e a aplicação conecta no Mongo de produção. Para
+um ambiente descartável, rode o jar a partir de uma pasta sem `.env`, passando as variáveis
+explicitamente, e confira o `address=` do log antes de enviar requisições.
+
 ## Execução de 2026-10-22 — remoção de redundâncias e perfil `test`
 
 - **Resultado: 35/35 antes e 35/35 depois** (`mvn -B clean test`), sem nenhuma conexão
@@ -52,12 +64,13 @@
 |---|---|---|
 | raiz | `PairUpApplicationTests` | 1 |
 | `user/` | `UserControllerTest` | 6 |
-| `pessoa/` | `PessoaControllerTest` | 8 |
+| `pessoa/` | `PessoaControllerTest` | 11 |
 | `match/` | `LikeControllerTest` | 5 |
 | `match/` | `MatchControllerTest` | 5 |
-| `imagem/` | `ImagemControllerTest` | 7 |
+| `imagem/` | `ImagemControllerTest` | 10 |
 | `tag/` | `TagControllerTest` | 3 |
-| **Total** | 7 classes | **35** |
+| `shared/config/` | `OpenApiDocsTest` | 2 |
+| **Total** | 8 classes | **43** |
 
 ## Como rodar a suíte com segurança
 

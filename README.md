@@ -8,7 +8,7 @@ comunidade universitária. Só o backend — não há frontend neste repositóri
 - Cadastro/login com e-mail e senha ou com Google (OAuth2), autenticação via JWT
 - Perfil (`Pessoa`) com filtros por gênero e interesse, e até 5 tags
 - Likes, com match automático quando recíproco
-- Upload de fotos (Cloudflare R2), visíveis só para o dono e para quem tem match
+- Upload de fotos (Cloudflare R2), visíveis no feed antes do match; exige `CF_R2_PUBLIC_URL`
 - Redes sociais liberadas apenas entre pessoas com match
 
 ## Stack
@@ -56,7 +56,8 @@ Pré-requisitos: JDK 21, Maven e Docker.
    mvn spring-boot:run
    ```
 
-3. Acesse o Swagger em `http://localhost:8080/swagger-ui/index.html`.
+3. Acesse o Swagger em `http://localhost:8080/swagger-ui.html`. Para testar rotas protegidas,
+   cole o token de `POST /users/login` no botão **Authorize**.
 
 ## Uso rápido da API
 
@@ -78,6 +79,7 @@ Passo a passo para subir o ambiente de teste em [`docs/TESTES.md`](docs/TESTES.m
 
 ## Documentação
 
+- [`docs/CONTRATO_FRONT_BACK.md`](docs/CONTRATO_FRONT_BACK.md) — como o front usa esta API
 - [`docs/ARQUITETURA.md`](docs/ARQUITETURA.md) — arquitetura, fluxos e riscos conhecidos
 - [`docs/REFERENCIA_FUNCOES.md`](docs/REFERENCIA_FUNCOES.md) — classes, métodos e endpoints
 - [`docs/TESTES.md`](docs/TESTES.md) — como rodar e resultados da suíte

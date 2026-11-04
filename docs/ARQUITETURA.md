@@ -41,10 +41,12 @@ comunidade universitária (UFS). Funcionalidades efetivamente implementadas:
 - perfil (`Pessoa`) separado da conta (`User`), com listagem paginada filtrável por
   `Genero`/`Interesse`;
 - likes; match automático quando o like é recíproco; desfazer match;
-- upload de fotos para Cloudflare R2 (S3), com compressão, e acesso via proxy autenticado
-  que redireciona para URL pré-assinada (1h) — só o dono ou quem tem match ativo;
-- "redes sociais" (Instagram/WhatsApp/Telegram) liberadas apenas via match — **porém não
-  existe nenhum endpoint que permita gravar essas redes** (ver risco R5).
+- upload de fotos para Cloudflare R2 (S3), com compressão. As fotos aparecem no feed antes do
+  match (decisão de 2026-11-02, ver R30), servidas pela URL pública do bucket
+  (`CF_R2_PUBLIC_URL`). O proxy autenticado, que redireciona para URL pré-assinada (1h), só
+  libera para o dono ou quem tem match ativo;
+- "redes sociais" (Instagram/WhatsApp/Telegram) liberadas apenas via match; gravadas em
+  `POST /pessoas` e `PUT /pessoas/me` via `PessoaRequestDTO` (R5 resolvido).
 
 **Stack** (`pom.xml`): Spring Boot 3.2.3 / Java 21 (`pom.xml:10,21`); starters Web,
 Validation, Security, OAuth2 Client, Data MongoDB (`pom.xml:41-60`); DevTools e Lombok;
@@ -198,7 +200,7 @@ e, para tudo que é social (likes, matches, imagens), **traduzem para `Pessoa.id
 - `GET /pessoas?interesse=&genero=&page=&size=` (`:32-49`) →
   `PessoaService.getAllPerfisWithFilters` (`PessoaService.java:40-75`): escolhe uma das 4
   queries derivadas de `PessoaRepository` (`pessoa/PessoaRepository.java:13-19`),
-  busca as imagens ativas da página em lote (`ImagemRepository.findByPessoaIdInAndAtivaTrue`)
+  busca as imagens ativas da página em lote (`ImagemRepository.findByPessoaInAndAtivaTrue`)
   e monta `PessoaPerfilDTO` com `convertToPerfilDTO(pessoa, imagens)` (`:192-194`), sem
   nenhuma query extra por pessoa (R13 resolvido em 2026-10-22). O filtro é literal (não é compatibilidade) e não exclui o próprio
   usuário nem quem já foi curtido; `cienciaResponsabilidade` sai sempre `false` (R39).
@@ -232,14 +234,15 @@ e, para tudo que é social (likes, matches, imagens), **traduzem para `Pessoa.id
   MIME `image/*` e 5 MB (`:188-199`); comprime (`imagem/ImageCompressionUtil.java:33-43`,
   com fallback para os bytes originais); envia ao R2 com chave
   `tinder_ufs/{pessoaId}/{uuid}.{ext}` (`:60`); se `perfil=true` desmarca a foto de perfil
-  anterior; persiste `Imagem` com `id` UUID e `url` = `CF_R2_PUBLIC_URL/key` se configurado,
+  anterior, e sem principal ativa a nova assume o lugar; persiste `Imagem` com `id` UUID e `url` = `CF_R2_PUBLIC_URL/key` se configurado,
   senão `/api/imagens/proxy/key` (`:181-186`). A resposta do controller sobrescreve `url`
   com o caminho de proxy (`ImagemController.java:53`). Sem limite de quantidade e confiando
   no MIME/extensão do cliente (R35).
 - `GET /api/imagens/minhas-imagens` (`:110-145`) — imagens ativas da própria pessoa.
 - `DELETE /api/imagens/{imagemId}` (`:71-108`) → `ImagemService.deletarImagem`
   (`:100-130`): 404 se não existe, 403 se não é dono, 400 se for a última imagem ativa;
-  apaga do R2 (erro só logado) e faz soft-delete (`ativa=false`). Responde **200** com
+  apaga do R2 (erro só logado), faz soft-delete (`ativa=false`) e, se era a principal, promove
+  a primeira foto ativa. Responde **200** com
   corpo (não 204).
 - `GET /api/imagens/proxy/{publicId}` (`imagem/ImagemProxyController.java:32-105`):
   bloqueia path traversal por lista de substrings (`:107-125`) e regex (`:28-30,127-132`);
@@ -289,7 +292,7 @@ com formatos diferentes (ver R16).
   | `FRONTEND_URL` | `OAuth2SuccessHandler.java:32` (só ali) | precisa ser **uma** URL; o compose usa duas separadas por vírgula (R9) |
   | `PORT` | `application.yml:35` | default 8080 |
   | `CF_R2_ENDPOINT`/`CF_R2_ACCESS_KEY`/`CF_R2_SECRET_KEY`/`CF_R2_BUCKET` | `application.yml:52-55` → `CloudflareR2Config`, `ImagemService` | obrigatórias (sem default) |
-  | `CF_R2_PUBLIC_URL` | `application.yml:56` → `ImagemService.java:38-39` | opcional; se definida, URLs diretas do bucket vazam em respostas (R6). **Está definida no `.env` atual → R6 ativo** |
+  | `CF_R2_PUBLIC_URL` | `application.yml:56` → `ImagemService.java:38-39` | necessária para o feed mostrar fotos antes do match (R30); com ela, URLs diretas do bucket aparecem nas respostas (R6). **Está definida no `.env` atual → R6 ativo** |
   | `CLOUDFLARE_R2_ENDPOINT`/`CLOUDFLARE_R2_PUBLIC_URL` (e demais `CLOUDFLARE_R2_*`) | binding relaxado do Spring para `cloudflare.r2.*` | não usadas pelo código diretamente; são o único jeito de sobrescrever os valores fixos do YAML de teste (`src/test/resources/application.yml:50-56`) — confirmado em execução |
   | `MONGO_ROOT_USER`/`MONGO_ROOT_PASSWORD` | `docker-compose.yml:13-14,43` | não documentadas no README |
 
@@ -303,8 +306,7 @@ com formatos diferentes (ver R16).
   vazios de `root`; `uploads/` não é usado por código algum), `mongo-init.js` (é um
   **diretório vazio** de `root`, não um script).
 - **Swagger**: `springdoc` em `/api-docs` e `/swagger-ui.html` (`application.yml:72-78`),
-  metadados em `shared/config/OpenAPIConfig.java`. O caminho que funciona é
-  `/swagger-ui/index.html`; `/swagger-ui.html` responde 302 para o OAuth (R8).
+  metadados e esquema Bearer em `shared/config/OpenAPIConfig.java` (R8 resolvido).
 - **Testes**: 7 classes, 35 testes de integração (`@SpringBootTest` + MockMvc), todas com
   `@ActiveProfiles("test")`. O perfil (`src/test/resources/application-test.yml`) fixa
   valores literais: MongoDB em `localhost:27018/PAIRUP_TEST`, S3 em `localhost:9000` com
@@ -378,7 +380,12 @@ garantidos pelo banco**. Somado a R3: likes/matches/usuários duplicados por con
 
 ### 5.2 Altos
 
-**R5. Redes sociais não podem ser cadastradas por nenhum endpoint.** Nenhum código chama
+**R5. [RESOLVIDO]** `POST /pessoas` e `PUT /pessoas/me` agora recebem `PessoaRequestDTO`, que
+grava redes sociais e tags (IDs). Também resolvido: `Imagem.pessoa` (`@DBRef`) era
+serializado dentro de `imagens[]`, expondo redes sociais, e-mail e `usuarioId` de todos em
+`GET /pessoas` — agora tem `@JsonIgnore`. Texto original abaixo, para histórico.
+
+**R5 (original). Redes sociais não podem ser cadastradas por nenhum endpoint.** Nenhum código chama
 `Pessoa.setInstagram/setWhatsapp/setTelegram` (só getters em `PessoaService.java:193-195,247-249`);
 `PessoaPerfilDTO` não tem esses campos. `GET /matches/{id}/redes-sociais` sempre devolve
 `null` nos três campos, salvo dados inseridos direto no banco.
@@ -396,7 +403,10 @@ estiver definida, `Imagem.url` = URL pública do bucket (`ImagemService.java:181
 responderia 401 sem token. Com o handler genérico, um GET autenticado nessa rota daria 500
 (ver R16).
 
-**R8. Swagger UI em `/swagger-ui.html` está bloqueado (302 para o OAuth).** São duas
+**R8. [RESOLVIDO]** `/swagger-ui.html` entrou nas rotas públicas do `SecurityConfig`. Texto
+original abaixo, para histórico.
+
+**R8 (original). Swagger UI em `/swagger-ui.html` está bloqueado (302 para o OAuth).** São duas
 listas de rotas públicas com regras de comparação diferentes:
 - O `JwtFilter` compara **por prefixo**: para padrões terminados em `/**` ele remove os 3
   últimos caracteres e usa `startsWith` (`JwtFilter.java:117-133`). `GET /swagger-ui/**`
@@ -542,7 +552,7 @@ a validação embutida de método pode disparar `HandlerMethodValidationExceptio
 ### 5.5 Riscos adicionados em 2026-10-03 (R29–R45)
 
 Numerados na ordem em que foram levantados (não por gravidade). Por gravidade:
-**críticos** R29, R32; **altos** R30, R31, R35, R43; **médios** R33, R34, R36, R37, R38,
+**críticos** R29, R32; **altos** R30 (política decidida), R31, R35, R43; **médios** R33, R34, R36, R37, R38,
 R39, R40, R41; **baixos** R42, R44, R45.
 
 **R29. ~~[Crítico] `mvn test` grava no MongoDB de produção.~~ Resolvido em 2026-10-22** pelo
@@ -557,7 +567,11 @@ Quem rodar `mvn test` na raiz sem sobrescrever `MONGODB_URI` polui (e pode corro
 R4/R37) a base de produção. Mitigação documentada em `README.md#testes` e `docs/TESTES.md`;
 correção real: perfil de teste com URI fixa ou Testcontainers.
 
-**R30. [Alto] Contradição de produto entre o feed e o proxy de fotos.** `GET /pessoas`
+**R30. ~~[Alto] Contradição de produto entre o feed e o proxy de fotos.~~ Política decidida em
+2026-11-02:** as fotos aparecem no feed antes do match. Funciona com `CF_R2_PUBLIC_URL`
+definida, o que torna essa variável obrigatória para o feed. Risco residual: sem ela, o proxy
+continua respondendo 403 a quem não tem match; e, com ela, as URLs são públicas, sem exigir
+login (R6). Texto original: `GET /pessoas`
 devolve as imagens de todos os perfis listados (`PessoaService.java:63-77`), mas o proxy só
 libera a foto para o dono ou para quem já tem match ativo com o dono
 (`ImagemProxyController.java:84-90`). Sem `CF_R2_PUBLIC_URL`, as URLs do feed são de proxy

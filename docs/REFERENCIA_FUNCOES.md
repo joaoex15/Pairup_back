@@ -465,7 +465,7 @@ Dependências: `ImagemRepository`, `PessoaRepository`, `ImageCompressionUtil`, `
 **`public Imagem salvarImagem(MultipartFile file, String pessoaId, boolean isPerfil) throws IOException`** (`:41-98`)
 - Valida o arquivo; carrega a `Pessoa`; comprime (se falhar, usa os bytes originais); envia ao
   bucket com chave `tinder_ufs/{pessoaId}/{uuid}.{ext}`; se `isPerfil`, desmarca a foto de
-  perfil anterior; grava `Imagem` com `id` UUID, `url` (pública ou proxy), `publicId` = chave,
+  perfil anterior; sem principal ativa, a nova assume o lugar; grava `Imagem` com `id` UUID, `url` (pública ou proxy), `publicId` = chave,
   tamanho e MIME.
 - Erros: `IllegalArgumentException` (arquivo vazio, não-imagem, > 5 MB, pessoa inexistente);
   exceções do SDK S3 propagam (o controller devolve 500). Se o banco falhar depois do upload, o
@@ -473,7 +473,8 @@ Dependências: `ImagemRepository`, `PessoaRepository`, `ImageCompressionUtil`, `
 
 **`public void deletarImagem(String imagemId, String pessoaId)`** (`:100-130`)
 - Confere existência e dono; impede apagar a última imagem ativa; tenta apagar do bucket
-  (erro só é logado); marca `ativa=false`.
+  (erro só é logado); marca `ativa=false` e `perfil=false`; se era a principal, promove a
+  primeira foto ativa.
 - Erros: `IllegalArgumentException` (não existe), `SecurityException` (não é dono),
   `IllegalStateException` (última imagem).
 
@@ -546,10 +547,11 @@ consultam o id dentro da referência.
 |---|---|
 | `Optional<Imagem> findByPublicId(String)` (`:13`) | `ImagemService.findByPublicId` |
 | `List<Imagem> findByPessoaIdAndAtivaTrue(String)` (`:15`) | `ImagemService.listarImagensAtivasPorUsuario` |
-| `Optional<Imagem> findByPessoaIdAndPerfilTrue(String)` (`:17`) | `ImagemService.salvarImagem` (não filtra `ativa`; se houver 2 com `perfil=true`, lança exceção de resultado não único) |
+| `List<Imagem> findByPessoaIdAndPerfilTrue(String)` (`:17`) | `ImagemService.salvarImagem` (não filtra `ativa`: desmarca todas as marcadas) |
+| `boolean existsByPessoaIdAndPerfilTrueAndAtivaTrue(String)` | `ImagemService.salvarImagem` |
 | `long countByPessoaIdAndAtivaTrue(String)` (`:19`) | `ImagemService.deletarImagem` |
 | `List<Imagem> findByPessoaAndAtivaTrue(Pessoa)` (`:21`) | `PessoaService` (conversores) |
-| `List<Imagem> findByPessoaIdInAndAtivaTrue(List<String>)` (`:23`) | `PessoaService.getAllPerfisWithFilters` |
+| `List<Imagem> findByPessoaInAndAtivaTrue(List<Pessoa>)` (`:23`) | `PessoaService.getAllPerfisWithFilters` |
 
 ---
 
@@ -592,7 +594,7 @@ Jackson/Spring Data o usam via nomes de parâmetros.
 
 ### Imagem
 `imagem/Imagem.java` — coleção `imagem`. Campos: `id` (UUID atribuído pelo service), `pessoa`
-(`@DBRef Pessoa` — serializado por inteiro no JSON, R2), `url`, `publicId` (chave no bucket,
+(`@DBRef(lazy = true) Pessoa`, com `@JsonIgnore`; `idDoDono()` lê o id sem consultar), `url`, `publicId` (chave no bucket,
 único declarado), `folderPath`, `perfil`, `dataUpload`, `tamanhoBytes`, `mimeType`, `ativa`.
 Índice composto `pessoa_perfil_idx` (`:16`). Construtor completo (`:47-58`) preenche
 `dataUpload = now()` e `ativa = true`.
