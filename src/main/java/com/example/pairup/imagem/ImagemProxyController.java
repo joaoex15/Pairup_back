@@ -7,6 +7,8 @@ import com.example.pairup.pessoa.PessoaService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,6 +20,7 @@ import java.util.regex.Pattern;
 @RestController
 @RequestMapping("/api/imagens/proxy")
 @RequiredArgsConstructor
+@Tag(name = "Imagens", description = "Upload e gerenciamento das fotos do perfil")
 public class ImagemProxyController {
 
     private final ImagemService imagemService;
@@ -30,6 +33,8 @@ public class ImagemProxyController {
     );
 
     @GetMapping("/**")
+    @Operation(summary = "Abrir foto",
+            description = "Redireciona para URL pré-assinada. Só para o dono ou quem tem match ativo.")
     public ResponseEntity<Void> proxyImagemHandler(HttpServletRequest request) {
         String fullPath = request.getRequestURI();
         String publicId = fullPath.replace("/api/imagens/proxy/", "");

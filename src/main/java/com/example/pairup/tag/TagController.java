@@ -2,6 +2,7 @@ package com.example.pairup.tag;
 
 import com.example.pairup.shared.security.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import jakarta.validation.Valid;
@@ -30,6 +31,7 @@ public class TagController {
      */
     @GetMapping
     @Operation(summary = "Listar todas as tags")
+    @SecurityRequirements
     public ResponseEntity<List<Tag>> getAll() {
         return ResponseEntity.ok(tagService.getAll());
     }
@@ -40,6 +42,7 @@ public class TagController {
      */
     @GetMapping("/ativas")
     @Operation(summary = "Listar tags ativas")
+    @SecurityRequirements
     public ResponseEntity<List<Tag>> getAtivas() {
         return ResponseEntity.ok(tagService.getAtivas());
     }

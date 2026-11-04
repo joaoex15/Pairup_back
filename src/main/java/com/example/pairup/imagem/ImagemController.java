@@ -3,6 +3,10 @@ package com.example.pairup.imagem;
 import com.example.pairup.pessoa.Pessoa;
 import com.example.pairup.shared.security.SecurityUtils;
 import com.example.pairup.pessoa.PessoaService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,12 +22,20 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/imagens")
 @RequiredArgsConstructor
+@Tag(name = "Imagens", description = "Upload e gerenciamento das fotos do perfil")
 public class ImagemController {
 
     private final ImagemService imagemService;
     private final PessoaService pessoaService;
 
-    @PostMapping("/upload")
+    @PostMapping(value = "/upload", consumes = "multipart/form-data")
+    @Operation(summary = "Enviar foto", description = "JPEG, PNG ou WebP, até 5 MB. perfil=true define a foto principal.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Foto enviada"),
+            @ApiResponse(responseCode = "400", description = "Arquivo inválido ou perfil inexistente"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado"),
+            @ApiResponse(responseCode = "413", description = "Arquivo acima do limite")
+    })
     public ResponseEntity<ImagemUploadResponseDTO> uploadImagem(
             @Valid @ModelAttribute ImagemUploadDTO uploadDTO) {
 
@@ -67,6 +79,14 @@ public class ImagemController {
     }
 
     @DeleteMapping("/{imagemId}")
+    @Operation(summary = "Remover foto")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Foto removida"),
+            @ApiResponse(responseCode = "400", description = "Última foto do perfil ou perfil inexistente"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado"),
+            @ApiResponse(responseCode = "403", description = "A foto é de outra pessoa"),
+            @ApiResponse(responseCode = "404", description = "Foto não encontrada")
+    })
     public ResponseEntity<ImagemUploadResponseDTO> deletarImagem(
             @PathVariable String imagemId) {
 
@@ -105,6 +125,11 @@ public class ImagemController {
     }
 
     @GetMapping("/minhas-imagens")
+    @Operation(summary = "Listar minhas fotos ativas")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Fotos retornadas"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado")
+    })
     public ResponseEntity<List<ImagemUploadResponseDTO>> listarMinhasImagens() {
         try {
             String userId = SecurityUtils.getUserIdOrThrow();

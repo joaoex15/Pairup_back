@@ -3,6 +3,7 @@ package com.example.pairup.user;
 import com.example.pairup.shared.security.JwtService;
 import com.example.pairup.shared.security.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -58,6 +59,7 @@ public class UserController {
      */
     @PostMapping("/login")
     @Operation(summary = "Login de usuário")
+    @SecurityRequirements
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Login realizado"),
             @ApiResponse(responseCode = "401", description = "Credenciais inválidas")
@@ -87,6 +89,7 @@ public class UserController {
      */
     @PostMapping
     @Operation(summary = "Criar usuário")
+    @SecurityRequirements
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Usuário criado"),
             @ApiResponse(responseCode = "400", description = "Dados inválidos"),
