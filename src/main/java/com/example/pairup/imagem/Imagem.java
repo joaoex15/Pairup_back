@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.convert.LazyLoadingProxy;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.DBRef;
@@ -25,7 +26,9 @@ public class Imagem {
     // Nunca serializar: a Pessoa inteira (redes sociais, usuarioId...) iria junto
     // em cada item de imagens[] de GET /pessoas.
     @JsonIgnore
-    @DBRef
+    // lazy: sem isso, listar imagens faz uma consulta à coleção pessoa por imagem (feed).
+    // Para só saber o dono, use idDoDono(): getPessoa().getId() também dispara a consulta.
+    @DBRef(lazy = true)
     private Pessoa pessoa;
 
     @NotBlank(message = "URL é obrigatória")
@@ -59,5 +62,12 @@ public class Imagem {
         this.mimeType = mimeType;
         this.dataUpload = LocalDateTime.now();
         this.ativa = true;
+    }
+
+    /** Id do dono, lido da referência, sem consultar a coleção pessoa. Não é getter: o Spring Data trataria como campo. */
+    public String idDoDono() {
+        return pessoa instanceof LazyLoadingProxy proxy
+                ? proxy.toDBRef().getId().toString()
+                : pessoa.getId();
     }
 }

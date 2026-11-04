@@ -60,14 +60,10 @@ public class PessoaService {
         if (page.isEmpty()) return page.map(p -> null);
 
         // 2. Buscar TODAS as imagens da página em uma única query (evita N+1)
-        List<String> pessoaIds = page.getContent().stream()
-                .map(Pessoa::getId)
-                .collect(Collectors.toList());
-
-        List<Imagem> todasImagens = imagemRepository.findByPessoaIdInAndAtivaTrue(pessoaIds);
+        List<Imagem> todasImagens = imagemRepository.findByPessoaInAndAtivaTrue(page.getContent());
 
         Map<String, List<Imagem>> imagensPorPessoa = todasImagens.stream()
-                .collect(Collectors.groupingBy(img -> img.getPessoa().getId()));
+                .collect(Collectors.groupingBy(Imagem::idDoDono));
 
         // 3. Montar DTOs com as imagens
         List<PessoaPerfilDTO> dtos = page.getContent().stream()

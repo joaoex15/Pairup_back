@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -365,6 +366,8 @@ class PessoaControllerTest {
                         .param("size", "100")
                         .with(comUsuario(visitanteId)))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[?(@.id == '" + dona.getId() + "')].fotoPerfilUrl",
+                        contains("http://localhost:9000/test-bucket/" + key)))
                 .andExpect(content().string(not(containsString("@maria_secreta"))));
     }
 }

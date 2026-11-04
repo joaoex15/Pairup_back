@@ -71,12 +71,15 @@ public class ImagemService {
 
         if (isPerfil) {
             imagemRepository.findByPessoaIdAndPerfilTrue(pessoaId)
-                    .ifPresent(imagemExistente -> {
+                    .forEach(imagemExistente -> {
                         imagemExistente.setPerfil(false);
                         imagemRepository.save(imagemExistente);
                         log.info("Removida flag de perfil da imagem: {}", imagemExistente.getId());
                     });
         }
+
+        // Sem foto principal (a marcada falhou no envio, por exemplo), esta assume o lugar
+        boolean perfil = isPerfil || !imagemRepository.existsByPessoaIdAndPerfilTrueAndAtivaTrue(pessoaId);
 
         String folderPath = key.substring(0, key.lastIndexOf('/'));
         String url = resolverUrl(key);
@@ -86,7 +89,7 @@ public class ImagemService {
                 url,
                 key,
                 folderPath,
-                isPerfil,
+                perfil,
                 (long) imagemComprimida.length,
                 contentType
         );
@@ -104,7 +107,7 @@ public class ImagemService {
         Imagem imagem = imagemRepository.findById(imagemId)
                 .orElseThrow(() -> new IllegalArgumentException("Imagem não encontrada: " + imagemId));
 
-        if (!imagem.getPessoa().getId().equals(pessoaId)) {
+        if (!imagem.idDoDono().equals(pessoaId)) {
             throw new SecurityException("Acesso negado: você não é o proprietário desta imagem");
         }
 
@@ -124,9 +127,20 @@ public class ImagemService {
             log.error("Erro ao remover arquivo do R2: {}", e.getMessage());
         }
 
+        boolean eraPerfil = imagem.isPerfil();
         imagem.setAtiva(false);
+        imagem.setPerfil(false);
         imagemRepository.save(imagem);
         log.info("Imagem {} marcada como inativa no banco", imagemId);
+
+        // Não existe endpoint para escolher a principal: a primeira foto ativa assume
+        if (eraPerfil) {
+            imagemRepository.findByPessoaIdAndAtivaTrue(pessoaId).stream().findFirst().ifPresent(nova -> {
+                nova.setPerfil(true);
+                imagemRepository.save(nova);
+                log.info("Imagem {} promovida a foto de perfil", nova.getId());
+            });
+        }
     }
 
     public String gerarUrlPresignada(String publicId) {

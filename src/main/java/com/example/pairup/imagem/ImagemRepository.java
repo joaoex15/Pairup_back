@@ -14,11 +14,16 @@ public interface ImagemRepository extends MongoRepository<Imagem, String> {
 
     List<Imagem> findByPessoaIdAndAtivaTrue(String pessoaId);
 
-    Optional<Imagem> findByPessoaIdAndPerfilTrue(String pessoaId);
+    // Lista: registros antigos podem ter uma imagem inativa ainda marcada como perfil
+    List<Imagem> findByPessoaIdAndPerfilTrue(String pessoaId);
+
+    boolean existsByPessoaIdAndPerfilTrueAndAtivaTrue(String pessoaId);
 
     long countByPessoaIdAndAtivaTrue(String pessoaId);
 
     List<Imagem> findByPessoaAndAtivaTrue(Pessoa pessoa);
 
-    List<Imagem> findByPessoaIdInAndAtivaTrue(List<String> pessoaIds);
+    // Recebe Pessoa, não String: Imagem.pessoa é @DBRef com ObjectId, e um $in por ids em
+    // String nunca casa (o feed ficava sem nenhuma foto).
+    List<Imagem> findByPessoaInAndAtivaTrue(List<Pessoa> pessoas);
 }

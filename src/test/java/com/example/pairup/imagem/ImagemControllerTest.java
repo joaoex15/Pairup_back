@@ -2,6 +2,7 @@ package com.example.pairup.imagem;
 
 import com.example.pairup.user.User;
 import com.example.pairup.pessoa.Pessoa;
+import com.example.pairup.pessoa.PessoaRepository;
 import com.example.pairup.pessoa.Genero;
 import com.example.pairup.pessoa.Interesse;
 import com.example.pairup.shared.security.JwtService;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.mongodb.core.convert.LazyLoadingProxy;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -23,6 +25,9 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.hasSize;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -46,6 +51,12 @@ class ImagemControllerTest {
 
     @Autowired
     private JwtService jwtService;
+
+    @Autowired
+    private ImagemRepository imagemRepository;
+
+    @Autowired
+    private PessoaRepository pessoaRepository;
 
     private String uid() {
         return UUID.randomUUID().toString().substring(0, 8);
@@ -228,5 +239,59 @@ class ImagemControllerTest {
         mockMvc.perform(delete("/api/imagens/" + imagemId)
                         .with(comUsuario(userId)))
                 .andExpect(status().isOk());
+    }
+
+    private String enviarFoto(String userId, boolean perfil) throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, "fake-image-bytes".getBytes());
+        MvcResult result = mockMvc.perform(multipart("/api/imagens/upload")
+                        .file(file)
+                        .param("perfil", String.valueOf(perfil))
+                        .with(comUsuario(userId)))
+                .andExpect(status().isOk())
+                .andReturn();
+        return objectMapper.readValue(
+                result.getResponse().getContentAsString(), ImagemUploadResponseDTO.class).getId();
+    }
+
+    @Test
+    void deletarFotoPrincipalPromoveAPrimeiraAtiva() throws Exception {
+        String userId = criarUserComPerfil();
+        String principal = enviarFoto(userId, true);
+        String outra = enviarFoto(userId, false);
+
+        mockMvc.perform(delete("/api/imagens/" + principal).with(comUsuario(userId)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/imagens/minhas-imagens").with(comUsuario(userId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(outra))
+                .andExpect(jsonPath("$[0].perfil").value(true));
+    }
+
+    @Test
+    void primeiraFotoSemPrincipalViraPrincipal() throws Exception {
+        String userId = criarUserComPerfil();
+        enviarFoto(userId, false);
+        enviarFoto(userId, false);
+
+        mockMvc.perform(get("/api/imagens/minhas-imagens").with(comUsuario(userId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.perfil == true)]", hasSize(1)));
+    }
+
+    @Test
+    void idDoDonoNaoDependeDeCarregarAPessoa() throws Exception {
+        String userId = criarUserComPerfil();
+        String imagemId = enviarFoto(userId, true);
+        Imagem imagem = imagemRepository.findById(imagemId).orElseThrow();
+        assertInstanceOf(LazyLoadingProxy.class, imagem.getPessoa());
+        String pessoaId = ((LazyLoadingProxy) imagem.getPessoa()).toDBRef().getId().toString();
+
+        // Sem o documento, qualquer carregamento falharia: o feed faria uma consulta por imagem
+        pessoaRepository.deleteById(pessoaId);
+
+        assertEquals(pessoaId, imagem.idDoDono());
     }
 }
