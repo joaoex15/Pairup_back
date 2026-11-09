@@ -83,6 +83,40 @@ class UserControllerTest {
     }
 
     @Test
+    void testCadastroComIdNaoSobrescreveContaExistente() throws Exception {
+        Map<String, String> ataque = Map.of(
+                "id", userId,
+                "nome", "Invasor",
+                "email", "invasor_" + UUID.randomUUID() + "@email.com",
+                "password", "senhaDoInvasor");
+
+        mockMvc.perform(post("/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(ataque)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(org.hamcrest.Matchers.not(userId)));
+
+        LoginRequestDTO login = new LoginRequestDTO();
+        login.setEmail(testEmail);
+        login.setPassword("123456");
+        mockMvc.perform(post("/users/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(login)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId").value(userId));
+    }
+
+    @Test
+    void testCadastroSemSenhaRetorna400() throws Exception {
+        Map<String, String> semSenha = Map.of("nome", "Sem", "email", "sem_" + UUID.randomUUID() + "@email.com");
+
+        mockMvc.perform(post("/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(semSenha)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void testGetMe() throws Exception {
         mockMvc.perform(get("/users/me")
                         .header("Authorization", "Bearer " + authToken))

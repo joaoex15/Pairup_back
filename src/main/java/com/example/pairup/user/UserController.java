@@ -95,7 +95,7 @@ public class UserController {
             @ApiResponse(responseCode = "400", description = "Dados inválidos"),
             @ApiResponse(responseCode = "409", description = "E-mail já cadastrado")
     })
-    public ResponseEntity<?> createUser(@RequestBody @Valid User user) {
+    public ResponseEntity<?> createUser(@RequestBody @Valid UserCreateDTO user) {
         try {
             User created = userService.createUser(user);
             created.setPassword(null);

@@ -17,12 +17,12 @@ public class UserService {
         return userRepository.findById(id).orElse(null);
     }
 
-    public User createUser(User user) {
-        if (userRepository.findByEmail(user.getEmail()).isPresent()) {
+    public User createUser(UserCreateDTO dados) {
+        if (userRepository.findByEmail(dados.getEmail()).isPresent()) {
             throw new IllegalArgumentException("Email já cadastrado");
         }
-        user.setPassword(passwordEncoder.encode(user.getPassword()));
-        return userRepository.save(user);
+        String senha = passwordEncoder.encode(dados.getPassword());
+        return userRepository.save(new User(dados.getNome(), dados.getEmail(), senha));
     }
 
     public User updateUser(String id, User userUpdates) {
