@@ -55,6 +55,12 @@ arquivo automaticamente.
 - **Feed**: `GET /pessoas` não filtra por compatibilidade nem por quem já foi avaliado. O front
   busca uma página de 100 e filtra localmente.
 
+## Aviso de match
+
+Quando `POST /likes` responde `match: true`, o front mostra o aviso na tela para quem acabou de
+curtir. O back envia um e-mail para a outra pessoa, no endereço da conta (`User.email`), de forma
+assíncrona: uma falha no envio só aparece no log e não afeta o like.
+
 ## Formato de erro
 
 Hoje há quatro formatos. `extrairErro` (`api.ts`) entende todos:
@@ -73,3 +79,4 @@ Hoje há quatro formatos. `extrairErro` (`api.ts`) entende todos:
 | Front | `VITE_API_BASE` | URL desta API |
 | Back | `FRONTEND_URL` | Destino do redirect depois do login Google |
 | Back | `BASE_URL` | Monta o `redirect-uri` do Google |
+| Back | `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM` | SMTP do aviso de match; sem `MAIL_HOST` ou `MAIL_FROM`, nada é enviado |

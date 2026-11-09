@@ -18,6 +18,7 @@ public class LikeService {
 
     private final LikeRepository likeRepository;
     private final MatchRepository matchRepository;
+    private final MatchEmailService matchEmailService;
 
     /**
      * ✅ CORRIGIDO: paginação delegada ao repositório.
@@ -67,7 +68,8 @@ public class LikeService {
         }
     }
 
-    private void criarMatchSeNaoExistir(String pessoa1, String pessoa2) {
+    /** @return true só quando um match novo foi criado */
+    private boolean criarMatchSeNaoExistir(String pessoa1, String pessoa2) {
         boolean jaExiste =
                 matchRepository.findByPessoaId1AndPessoaId2(pessoa1, pessoa2).isPresent() ||
                         matchRepository.findByPessoaId1AndPessoaId2(pessoa2, pessoa1).isPresent();
@@ -79,6 +81,7 @@ public class LikeService {
             match.setAtivo(true);
             matchRepository.save(match);
         }
+        return !jaExiste;
     }
 
     /**
@@ -99,7 +102,10 @@ public class LikeService {
         Map<String, Object> response = new HashMap<>();
 
         if (isMatch) {
-            criarMatchSeNaoExistir(origemId, destinoId);
+            // Quem curtiu agora vê o aviso na tela; o e-mail vai para a outra pessoa.
+            if (criarMatchSeNaoExistir(origemId, destinoId)) {
+                matchEmailService.notificarMatch(destinoId, origemId);
+            }
             response.put("match", true);
             response.put("message", "É um match!");
         } else {

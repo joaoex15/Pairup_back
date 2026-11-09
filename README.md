@@ -46,6 +46,11 @@ Pré-requisitos: JDK 21, Maven e Docker.
    CF_R2_SECRET_KEY=
    CF_R2_BUCKET=
    MONGODB_URI=           # opcional, default mongodb://localhost:27017/PAIRUP
+   MAIL_HOST=             # opcional: SMTP do aviso de match; vazio desliga o envio
+   MAIL_PORT=             # opcional, default 587
+   MAIL_USERNAME=
+   MAIL_PASSWORD=
+   MAIL_FROM=             # remetente; obrigatório para enviar
    ```
 
 2. Suba a aplicação:

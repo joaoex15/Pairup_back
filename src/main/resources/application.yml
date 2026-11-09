@@ -10,6 +10,20 @@ spring:
       max-request-size: 30MB
       enabled: true
       resolve-lazily: true
+  # Sem MAIL_HOST os e-mails ficam desligados e a aplicação funciona normalmente.
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          starttls:
+            enable: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
   security:
     oauth2:
       client:
@@ -54,6 +68,10 @@ cloudflare:
     secret-key: ${CF_R2_SECRET_KEY}
     bucket: ${CF_R2_BUCKET}
     public-url: ${CF_R2_PUBLIC_URL:}
+
+notificacao:
+  email:
+    remetente: ${MAIL_FROM:}
 
 file:
   compress:

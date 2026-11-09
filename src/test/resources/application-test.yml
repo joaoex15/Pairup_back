@@ -6,6 +6,9 @@ spring:
   data:
     mongodb:
       uri: mongodb://localhost:27018/PAIRUP_TEST
+  # Vazio de propósito: os testes nunca usam o SMTP do .env.
+  mail:
+    host: ""
   security:
     oauth2:
       client:
