@@ -162,11 +162,33 @@ class PessoaControllerTest {
                 .andExpect(jsonPath("$.id").value(criada.getId()))
                 .andExpect(jsonPath("$.nome").value("João"))
                 .andExpect(jsonPath("$.curso").value("Engenharia"))
-                .andExpect(jsonPath("$.dataNasc").value("2001-01-01"))
+                .andExpect(jsonPath("$.idade").isNumber())
+                .andExpect(jsonPath("$.email").doesNotExist())
+                .andExpect(jsonPath("$.dataNasc").doesNotExist())
                 .andExpect(jsonPath("$.tags").isArray())
                 .andExpect(jsonPath("$.imagens").isArray())
                 .andExpect(jsonPath("$.instagram").doesNotExist())
                 .andExpect(jsonPath("$.whatsapp").doesNotExist());
+    }
+
+    @Test
+    void testCadastroIncompletoNaoApareceNoFeedNemCurte() throws Exception {
+        String userId = criarUser("Google");
+        Pessoa minima = new Pessoa();
+        minima.setNome("Google");
+        minima.setEmail("google_" + uid() + "@email.com");
+        minima.setUsuarioId(userId);
+        minima.setAtivo(true);
+        String id = pessoaRepository.save(minima).getId();
+
+        mockMvc.perform(get("/pessoas").param("size", "2000")
+                        .with(comUsuario(userId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[?(@.id == '" + id + "')]").isEmpty());
+
+        mockMvc.perform(post("/likes").param("destinoId", "qualquer")
+                        .with(comUsuario(userId)))
+                .andExpect(status().isForbidden());
     }
 
     @Test

@@ -16,6 +16,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDate;
+import java.time.Period;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -48,13 +50,13 @@ public class PessoaService {
         // 1. Delegar filtros e paginação ao banco
         Page<Pessoa> page;
         if (interesse != null && genero != null) {
-            page = pessoaRepository.findByAtivoTrueAndInteresseAndGenero(interesse, genero, pageable);
+            page = pessoaRepository.findListaveisPorInteresseEGenero(interesse, genero, pageable);
         } else if (interesse != null) {
-            page = pessoaRepository.findByAtivoTrueAndInteresse(interesse, pageable);
+            page = pessoaRepository.findListaveisPorInteresse(interesse, pageable);
         } else if (genero != null) {
-            page = pessoaRepository.findByAtivoTrueAndGenero(genero, pageable);
+            page = pessoaRepository.findListaveisPorGenero(genero, pageable);
         } else {
-            page = pessoaRepository.findByAtivoTrue(pageable);
+            page = pessoaRepository.findListaveis(pageable);
         }
 
         if (page.isEmpty()) return page.map(p -> null);
@@ -180,6 +182,23 @@ public class PessoaService {
         return pessoa.getId();
     }
 
+    /**
+     * Pessoa.id de quem vai interagir com outros perfis: 403 se o cadastro está incompleto,
+     * como no perfil mínimo do login Google, que ainda não informou idade nem aceitou os termos.
+     */
+    public String getPessoaIdComCadastroCompletoOrThrow(String usuarioId) {
+        Pessoa pessoa = findByUsuarioId(usuarioId);
+        if (pessoa == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Perfil não encontrado. Complete seu cadastro primeiro.");
+        }
+        if (!pessoa.temCadastroCompleto()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Complete seu cadastro antes de curtir outros perfis.");
+        }
+        return pessoa.getId();
+    }
+
     public void delete(String id) {
         Pessoa pessoa = findById(id);
         if (pessoa != null) {
@@ -194,6 +213,9 @@ public class PessoaService {
         PessoaCompletaDTO dto = preencherPerfil(new PessoaCompletaDTO(), pessoa,
                 imagemRepository.findByPessoaAndAtivaTrue(pessoa));
         dto.setCienciaResponsabilidade(pessoa.isCienciaResponsabilidade());
+        dto.setEmail(pessoa.getEmail());
+        dto.setDataNasc(pessoa.getDataNasc());
+        dto.setPerfilCompleto(pessoa.temCadastroCompleto());
         dto.setInstagram(pessoa.getInstagram());
         dto.setWhatsapp(pessoa.getWhatsapp());
         dto.setTelegram(pessoa.getTelegram());
@@ -209,8 +231,8 @@ public class PessoaService {
         dto.setId(pessoa.getId());
         dto.setNome(pessoa.getNome());
         dto.setCurso(pessoa.getCurso());
-        dto.setDataNasc(pessoa.getDataNasc());
-        dto.setEmail(pessoa.getEmail());
+        dto.setIdade(pessoa.getDataNasc() == null ? null
+                : Period.between(pessoa.getDataNasc(), LocalDate.now()).getYears());
         dto.setGenero(pessoa.getGenero());
         dto.setInteresse(pessoa.getInteresse());
         dto.setDescricao(pessoa.getDescricao());

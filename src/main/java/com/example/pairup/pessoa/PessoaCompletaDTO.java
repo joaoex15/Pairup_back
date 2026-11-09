@@ -1,11 +1,13 @@
 package com.example.pairup.pessoa;
 
 import com.example.pairup.imagem.Imagem;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -17,6 +19,13 @@ import java.util.List;
 @EqualsAndHashCode(callSuper = true)
 @ToString(callSuper = true)
 public class PessoaCompletaDTO extends PessoaPerfilDTO {
+
+    private String email;
+
+    @JsonFormat(pattern = "yyyy-MM-dd")
+    private LocalDate dataNasc;
+
+    private boolean perfilCompleto;
 
     // ==================== REDES SOCIAIS ====================
     private String instagram;
@@ -40,14 +49,5 @@ public class PessoaCompletaDTO extends PessoaPerfilDTO {
         return imagens.stream()
                 .filter(img -> !img.getUrl().equals(getFotoPerfilUrl()))
                 .toList();
-    }
-
-    public boolean isPerfilCompleto() {
-        return getNome() != null && !getNome().isEmpty()
-                && getCurso() != null && !getCurso().isEmpty()
-                && getDataNasc() != null
-                && getGenero() != null
-                && getInteresse() != null
-                && isCienciaResponsabilidade();
     }
 }

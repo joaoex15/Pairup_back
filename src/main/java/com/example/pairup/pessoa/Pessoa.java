@@ -73,4 +73,14 @@ public class Pessoa {
         if (dataNasc == null) return false;
         return Period.between(dataNasc, LocalDate.now()).getYears() >= 18;
     }
+
+    /** Não é getter de propósito: não deve virar campo no JSON nem no Mongo. */
+    public boolean temCadastroCompleto() {
+        return nome != null && !nome.isEmpty()
+                && curso != null && !curso.isEmpty()
+                && isMaiorDeIdade()
+                && genero != null
+                && interesse != null
+                && cienciaResponsabilidade;
+    }
 }

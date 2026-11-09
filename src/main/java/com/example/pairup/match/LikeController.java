@@ -43,14 +43,15 @@ public class LikeController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Like registrado"),
             @ApiResponse(responseCode = "400", description = "Dados inválidos, auto-like ou perfil inexistente"),
-            @ApiResponse(responseCode = "401", description = "Não autenticado")
+            @ApiResponse(responseCode = "401", description = "Não autenticado"),
+            @ApiResponse(responseCode = "403", description = "Cadastro incompleto")
     })
     public ResponseEntity<?> darLike(
             @Parameter(description = "ID da pessoa que recebe o like")
             @RequestParam @NotBlank String destinoId) {
 
         String userId = SecurityUtils.getUserIdOrThrow();
-        String origemId = pessoaService.getPessoaIdOrThrow(userId);
+        String origemId = pessoaService.getPessoaIdComCadastroCompletoOrThrow(userId);
 
         // ✅ Impede auto-like
         if (origemId.equals(destinoId)) {
