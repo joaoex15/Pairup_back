@@ -191,4 +191,42 @@ class UserControllerTest {
                         .header("Authorization", "Bearer " + tempToken))
                 .andExpect(status().isNoContent());
     }
+
+    private org.springframework.test.web.servlet.ResultActions trocarEmail(String novoEmail, String senhaAtual) throws Exception {
+        Map<String, String> corpo = new java.util.HashMap<>();
+        corpo.put("email", novoEmail);
+        if (senhaAtual != null) corpo.put("senhaAtual", senhaAtual);
+        return mockMvc.perform(put("/users/me")
+                .header("Authorization", "Bearer " + authToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(corpo)));
+    }
+
+    @Test
+    void trocarEmailSemSenhaAtualDeveRetornar403() throws Exception {
+        trocarEmail("novo_" + UUID.randomUUID().toString().substring(0, 8) + "@email.com", null)
+                .andExpect(status().isForbidden());
+        trocarEmail("novo_" + UUID.randomUUID().toString().substring(0, 8) + "@email.com", "senhaErrada")
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void trocarEmailComSenhaAtualFunciona() throws Exception {
+        String novo = "novo_" + UUID.randomUUID().toString().substring(0, 8) + "@email.com";
+        trocarEmail(novo, "123456")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value(novo));
+    }
+
+    @Test
+    void trocarEmailParaUmJaUsadoDeveRetornar409() throws Exception {
+        User outro = novoUser("Outro");
+        mockMvc.perform(post("/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(outro)))
+                .andExpect(status().isOk());
+
+        trocarEmail(outro.getEmail(), "123456")
+                .andExpect(status().isConflict());
+    }
 }

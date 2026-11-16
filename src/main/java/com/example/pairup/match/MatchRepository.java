@@ -20,4 +20,7 @@ public interface MatchRepository extends MongoRepository<Match, String> {
     Optional<Match> findByPessoaId1AndPessoaId2(String pessoaId1, String pessoaId2);
 
     boolean existsByPessoaId1AndPessoaId2AndAtivoTrue(String pessoaId1, String pessoaId2);
+
+    /** Apaga todos os matches de uma pessoa, ativos ou não (exclusão de perfil). */
+    long deleteByPessoaId1OrPessoaId2(String pessoaId1, String pessoaId2);
 }

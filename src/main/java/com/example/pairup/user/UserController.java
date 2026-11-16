@@ -113,21 +113,20 @@ public class UserController {
     @Operation(summary = "Atualizar meu usuário")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Usuário atualizado"),
-            @ApiResponse(responseCode = "401", description = "Não autenticado")
+            @ApiResponse(responseCode = "400", description = "Dados inválidos ou conta Google tentando trocar o e-mail"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado"),
+            @ApiResponse(responseCode = "403", description = "Troca de e-mail sem a senha atual correta"),
+            @ApiResponse(responseCode = "409", description = "E-mail já usado por outra conta")
     })
     public ResponseEntity<?> updateMe(
-            @RequestBody @Valid User user) {
+            @RequestBody @Valid UserUpdateDTO dados) {
 
-        try {
-            String userId = SecurityUtils.getUserIdOrThrow();
-            User updated = userService.updateUser(userId, user);
-            if (updated == null) return ResponseEntity.notFound().build();
-            updated.setPassword(null);
-            return ResponseEntity.ok(updated);
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("erro", "Usuário não autenticado"));
-        }
+        String userId = SecurityUtils.getUserIdOrThrow();
+        // Erros de negócio (403, 409) saem pelo GlobalExceptionHandler, não como 401
+        User updated = userService.updateUser(userId, dados);
+        if (updated == null) return ResponseEntity.notFound().build();
+        updated.setPassword(null);
+        return ResponseEntity.ok(updated);
     }
 
     /**

@@ -143,6 +143,28 @@ public class ImagemService {
         }
     }
 
+    /**
+     * Apaga todas as fotos da pessoa: o arquivo no R2 e o registro no banco.
+     * Usado na exclusão do perfil, então ignora a regra de "não apagar a última foto".
+     * Falha ao apagar no R2 só é logada: o perfil sai do app de qualquer forma.
+     */
+    public void apagarTodasDaPessoa(Pessoa pessoa) {
+        List<Imagem> imagens = imagemRepository.findByPessoa(pessoa);
+        for (Imagem imagem : imagens) {
+            try {
+                s3Client.deleteObject(DeleteObjectRequest.builder()
+                        .bucket(bucket)
+                        .key(imagem.getPublicId())
+                        .build());
+            } catch (Exception e) {
+                log.error("Erro ao remover do R2 {} na exclusão do perfil {}: {}",
+                        imagem.getPublicId(), pessoa.getId(), e.getMessage());
+            }
+        }
+        imagemRepository.deleteAll(imagens);
+        log.info("{} imagens apagadas na exclusão do perfil {}", imagens.size(), pessoa.getId());
+    }
+
     public String gerarUrlPresignada(String publicId) {
         GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
                 .signatureDuration(Duration.ofHours(1))

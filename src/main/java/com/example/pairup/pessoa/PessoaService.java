@@ -1,7 +1,11 @@
 package com.example.pairup.pessoa;
 
+import com.example.pairup.match.DislikeRepository;
+import com.example.pairup.match.LikeRepository;
+import com.example.pairup.match.MatchRepository;
 import com.example.pairup.match.PessoaRedesSociaisDTO;
 import com.example.pairup.imagem.Imagem;
+import com.example.pairup.imagem.ImagemService;
 import com.example.pairup.tag.Tag;
 import com.example.pairup.tag.TagRepository;
 import com.example.pairup.imagem.ImagemRepository;
@@ -31,6 +35,10 @@ public class PessoaService {
     private final PessoaRepository pessoaRepository;
     private final ImagemRepository imagemRepository;
     private final TagRepository tagRepository;
+    private final ImagemService imagemService;
+    private final LikeRepository likeRepository;
+    private final DislikeRepository dislikeRepository;
+    private final MatchRepository matchRepository;
 
     // ==================== BUSCAS COMPLETAS ====================
 
@@ -199,12 +207,29 @@ public class PessoaService {
         return pessoa.getId();
     }
 
+    /**
+     * Apaga o perfil e tudo que aponta para ele: fotos (no R2 e no banco), likes e dislikes
+     * dados e recebidos, e matches. Sem isso, a outra pessoa continuaria vendo o match e as
+     * fotos ficariam no bucket. Não é atômico (o Mongo do projeto não tem transações); se
+     * falhar no meio, chamar de novo termina a limpeza.
+     */
     public void delete(String id) {
         Pessoa pessoa = findById(id);
-        if (pessoa != null) {
-            log.info("Deletando usuário: {}", pessoa.getEmail());
-            pessoaRepository.deleteById(id);
-        }
+        if (pessoa == null) return;
+
+        long likes    = likeRepository.deleteByPessoaOrigemIdOrPessoaDestinoId(id, id);
+        long dislikes = dislikeRepository.deleteByPessoaOrigemIdOrPessoaDestinoId(id, id);
+        long matches  = matchRepository.deleteByPessoaId1OrPessoaId2(id, id);
+        imagemService.apagarTodasDaPessoa(pessoa);
+        pessoaRepository.deleteById(id);
+
+        log.info("Perfil {} apagado: {} likes, {} dislikes, {} matches", id, likes, dislikes, matches);
+    }
+
+    /** Exclusão da conta: apaga o perfil vinculado, se houver, com a mesma cascata. */
+    public void deleteByUsuarioId(String usuarioId) {
+        Pessoa pessoa = findByUsuarioId(usuarioId);
+        if (pessoa != null) delete(pessoa.getId());
     }
 
     // ==================== CONVERSORES ====================

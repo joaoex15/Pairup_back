@@ -23,6 +23,9 @@ public interface ImagemRepository extends MongoRepository<Imagem, String> {
 
     List<Imagem> findByPessoaAndAtivaTrue(Pessoa pessoa);
 
+    /** Todas as imagens da pessoa, inclusive as inativas (exclusão de perfil). */
+    List<Imagem> findByPessoa(Pessoa pessoa);
+
     // Recebe Pessoa, não String: Imagem.pessoa é @DBRef com ObjectId, e um $in por ids em
     // String nunca casa (o feed ficava sem nenhuma foto).
     List<Imagem> findByPessoaInAndAtivaTrue(List<Pessoa> pessoas);

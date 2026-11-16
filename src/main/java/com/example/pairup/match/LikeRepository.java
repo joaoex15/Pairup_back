@@ -17,4 +17,7 @@ public interface LikeRepository extends MongoRepository<Like, String> {
     Page<Like> findByPessoaDestinoIdAndAtivoTrue(String pessoaDestinoId, Pageable pageable);
 
     Optional<Like> findByPessoaOrigemIdAndPessoaDestinoId(String pessoaOrigemId, String pessoaDestinoId);
+
+    /** Apaga os likes dados e recebidos por uma pessoa (exclusão de perfil). */
+    long deleteByPessoaOrigemIdOrPessoaDestinoId(String pessoaOrigemId, String pessoaDestinoId);
 }
