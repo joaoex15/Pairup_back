@@ -32,6 +32,8 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
     @Value("${FRONTEND_URL:http://localhost:5173}")
     private String frontendUrl;
 
+    private static final String PROVIDER_GOOGLE = "google";
+
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request,
                                         HttpServletResponse response,
@@ -42,10 +44,25 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
         String email = oauth2User.getAttribute("email");
         String nome = oauth2User.getAttribute("name");
 
-        // Busca o usuário ou cria um novo se for o primeiro login pelo Google
-        User user = userRepository.findByEmail(email).orElseGet(() -> {
+        // Só aceita e-mail que o Google confirmou: é ele que identifica a conta.
+        if (email == null || !Boolean.TRUE.equals(oauth2User.getAttribute("email_verified"))) {
+            redirecionarComErro(request, response, "email_nao_verificado");
+            return;
+        }
+
+        Optional<User> existente = userRepository.findByEmail(email);
+
+        // Conta criada com e-mail e senha: o cadastro local não confirma o e-mail, então
+        // qualquer pessoa pode ter registrado esse endereço com uma senha que conhece.
+        // Vincular o login Google a ela entregaria a sessão da vítima a quem criou a conta.
+        if (existente.isPresent() && !PROVIDER_GOOGLE.equals(existente.get().getProvider())) {
+            redirecionarComErro(request, response, "conta_com_senha");
+            return;
+        }
+
+        User user = existente.orElseGet(() -> {
             User novo = new User(nome, email, null);
-            novo.setProvider("google");
+            novo.setProvider(PROVIDER_GOOGLE);
             return userRepository.save(novo);
         });
 
@@ -63,10 +80,19 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
 
         String token = jwtService.generateToken(user.getId().toString());
 
-        // Remove trailing slash do FRONTEND_URL para evitar URL com barra dupla (//auth/callback)
-        String baseUrl = frontendUrl.endsWith("/") ? frontendUrl.substring(0, frontendUrl.length() - 1) : frontendUrl;
-        String redirectUrl = baseUrl + "/auth/callback?token=" + token;
+        String redirectUrl = baseUrl() + "/auth/callback?token=" + token;
 
         getRedirectStrategy().sendRedirect(request, response, redirectUrl);
+    }
+
+    /** Volta para a tela de login do front com um código de erro que ela sabe exibir. */
+    private void redirecionarComErro(HttpServletRequest request, HttpServletResponse response,
+                                     String codigo) throws IOException {
+        getRedirectStrategy().sendRedirect(request, response, baseUrl() + "/?erro=" + codigo);
+    }
+
+    /** FRONTEND_URL sem barra final, para não gerar //auth/callback. */
+    private String baseUrl() {
+        return frontendUrl.endsWith("/") ? frontendUrl.substring(0, frontendUrl.length() - 1) : frontendUrl;
     }
 }
