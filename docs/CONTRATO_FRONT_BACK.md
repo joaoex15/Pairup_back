@@ -53,7 +53,17 @@ arquivo automaticamente.
 - **Fotos no feed**: aparecem antes do match. Exige `CF_R2_PUBLIC_URL` no back; sem ela, as URLs
   são do proxy, que responde 403 a quem não tem match (R30).
 - **Feed**: `GET /pessoas` não filtra por compatibilidade nem por quem já foi avaliado. O front
-  busca uma página de 100 e filtra localmente.
+  busca páginas de 100 (`sort=id`, para a ordem ser estável) sob demanda, sempre que restam menos
+  de 5 pessoas no deck, e filtra localmente. Matches, likes e dislikes são lidos por completo
+  (todas as páginas) para tirar do deck quem já teve interação.
+- **Dislike**: `POST /dislikes?destinoId=` responde 204 e é idempotente; 400 para si mesmo ou
+  perfil inexistente. `GET /dislikes/dados` é paginado como os likes.
+- **`PUT /users/me`**: corpo `{ nome?, email?, senhaAtual? }`. Trocar o e-mail exige
+  `senhaAtual` (403 se errada), dá 409 se o e-mail já é de outra conta e 400 em conta Google.
+- **Login Google com erro**: o back redireciona para `/?erro=conta_com_senha` ou
+  `/?erro=email_nao_verificado`, e a tela de login mostra a mensagem.
+- **Exclusão**: `DELETE /pessoas/me` apaga fotos, likes, dislikes e matches da pessoa;
+  `DELETE /users/me` também apaga o perfil.
 
 ## Aviso de match
 

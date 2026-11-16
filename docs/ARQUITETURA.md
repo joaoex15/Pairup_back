@@ -431,7 +431,7 @@ Confirmado em execução: `/swagger-ui.html` → `302 Location: /oauth2/authoriz
 redireciona para `http://localhost:3000,http://localhost:5173/auth/callback?token=...`.
 O valor parece herdado da antiga variável de CORS.
 
-**R10. Exclusões deixam órfãos e perfis "fantasmas".** `DELETE /users/me` apaga só o `User`
+**R10. ~~Exclusões deixam órfãos e perfis "fantasmas".~~ Resolvido em 2026-11-15:** `PessoaService.delete` apaga fotos (R2 e banco), likes, dislikes e matches, e `DELETE /users/me` apaga o perfil. Não é atômico (R3). Texto original: `DELETE /users/me` apaga só o `User`
 (`UserService.java:48-50`); a `Pessoa` continua `ativo=true` e listada em `GET /pessoas`.
 `DELETE /pessoas/me` apaga só a `Pessoa` (`PessoaService.java:164-170`): imagens (inclusive
 objetos no R2), likes e matches ficam órfãos.
@@ -589,7 +589,7 @@ cadastro de perfil fica inacessível para quem entrou pelo Google. O único cami
 o que não está documentado para o frontend; enquanto isso o perfil incompleto já aparece em
 `GET /pessoas`.
 
-**R32. [Crítico] Conta Google é vinculada à conta local só pelo e-mail, sem verificação.**
+**R32. ~~[Crítico] Conta Google é vinculada à conta local só pelo e-mail, sem verificação.~~ Resolvido em 2026-11-15:** o `OAuth2SuccessHandler` exige `email_verified` e não entra em conta com `provider` diferente de `google` (redireciona para `/?erro=conta_com_senha`). Texto original:
 `OAuth2SuccessHandler.java:46-50` usa `userRepository.findByEmail(email)` e, se achar, emite
 o JWT dessa conta. `POST /users` (`UserController.java:96`, `UserService.java:20-26`) não
 verifica posse do e-mail. Um atacante pode **pré-registrar** uma conta local com o e-mail
