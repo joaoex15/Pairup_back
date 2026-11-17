@@ -10,11 +10,11 @@ API REST do PairUp: contas, perfis, feed, likes, dislikes, matches, fotos e tags
 | Linguagem | Java | 21 |
 | Framework | Spring Boot | 3.2.3 (Web, Validation, Security, OAuth2 Client, Mail) |
 | Banco | MongoDB, via Spring Data MongoDB | 7.0 no Docker local |
-| Autenticação | JWT (jjwt) + login Google (OAuth2/OIDC) | token de 15 min, sem refresh |
+| Autenticação | JWT (jjwt) + login Google (OAuth2/OIDC) | token de 15 min, sem refresh; BCrypt custo 12 |
 | Fotos | Cloudflare R2, via AWS SDK v2 (S3) | MinIO nos testes |
-| Imagem | Thumbnailator | redimensiona para 800×800, qualidade 0.7 |
+| Imagem | Thumbnailator + ImageIO | valida pelo conteúdo e re-codifica em 800×800, qualidade 0.7 |
 | E-mail | Spring Mail (SMTP) | opcional; sem `MAIL_HOST` fica desligado |
-| Documentação da API | springdoc-openapi | 2.3.0, em `/swagger-ui/index.html` |
+| Documentação da API | springdoc-openapi | 2.3.0, em `/swagger-ui.html`; desligado sem `SWAGGER_ENABLED=true` |
 | Configuração | spring-dotenv | lê o `.env` da raiz |
 | Utilitários | Lombok | — |
 | Build | Maven | `pom.xml` |
@@ -52,10 +52,11 @@ Tinder_ufs/
     │   │   ├── Imagem, ImagemRepository, ImagemService, ImagemController
     │   │   ├── ImagemProxyController, ImageCompressionUtil
     │   │   └── ImagemUploadDTO, ImagemUploadResponseDTO, AuditLogService
-    │   ├── tag/                        interesses exibidos nos perfis
+    │   ├── tag/                        interesses exibidos nos perfis (Tag, TagRequestDTO...)
     │   └── shared/
     │       ├── config/     SecurityConfig, OAuth2SuccessHandler, CloudflareR2Config, OpenAPIConfig
-    │       ├── security/   JwtService, JwtFilter, SecurityUtils, CustomUserDetailsService
+    │       ├── security/   JwtService, JwtFilter, RateLimitFilter, LoginAttemptService,
+    │       │               SecurityUtils, CustomUserDetailsService
     │       └── exception/  GlobalExceptionHandler
     ├── main/resources/application.yml
     └── test/
@@ -84,16 +85,22 @@ endpoint recebe do front o id de quem está agindo.
 ## Funcionalidades
 
 ### Conta e login
-- **Cadastro** (`POST /users`): nome, e-mail e senha (6 a 72 caracteres). O DTO não aceita `id`
-  nem `provider`, então não dá para sobrescrever uma conta existente.
+- **Cadastro** (`POST /users`): nome, e-mail e senha (**8 a 72** caracteres). O e-mail é gravado
+  em minúsculas. O DTO não aceita `id` nem `provider`, então não dá para sobrescrever uma conta
+  existente.
 - **Login** (`POST /users/login`): devolve um JWT válido por 15 minutos.
+  - Senha errada, e-mail inexistente e conta Google dão a mesma resposta (401) no mesmo tempo.
+  - 5 falhas seguidas bloqueiam o e-mail por 15 min (429).
+  - Contas antigas com senha de 6 caracteres continuam entrando.
 - **Login Google**: o Spring Security faz o fluxo OAuth2. Depois, o `OAuth2SuccessHandler` faz
   o seguinte:
   - exige `email_verified`;
   - **recusa entrar numa conta criada com senha** e volta para `/?erro=conta_com_senha`, porque
     o cadastro local não confirma o e-mail;
   - cria a conta Google e um perfil mínimo, se ainda não existirem;
-  - redireciona para `/auth/callback?token=...` no front.
+  - redireciona para `/auth/callback#token=...` no front (token no fragmento, fora de logs e
+    do `Referer`);
+  - se o fluxo do Google falhar, redireciona para `/?erro=google_falhou`.
 - **Alterar conta** (`PUT /users/me`): nome e e-mail.
   - Trocar o e-mail exige `senhaAtual` (403 se errada).
   - E-mail de outra conta → 409.
@@ -102,7 +109,10 @@ endpoint recebe do front o id de quem está agindo.
 
 ### Perfil e feed
 - **Criar perfil** (`POST /pessoas`):
-  - exige 18 anos e o aceite dos termos;
+  - exige 18 anos (e nascimento a no máximo 100 anos) e o aceite dos termos;
+  - usa o e-mail da conta; o `email` do corpo é ignorado;
+  - redes sociais só como usuário/número: Instagram `@?[A-Za-z0-9._]{1,30}`, Telegram
+    `@?[A-Za-z0-9_]{1,32}`, WhatsApp com 8 a 20 dígitos/espaços/`()+-`;
   - aceita no máximo 5 tags, só ativas;
   - um perfil por conta (409 se já existe).
 - **Editar perfil** (`PUT /pessoas/me`): campo ausente mantém o valor; string vazia apaga uma
@@ -123,7 +133,7 @@ endpoint recebe do front o id de quem está agindo.
   - grava a curtida;
   - se já existe a curtida inversa, cria o match e responde `match: true`;
   - a outra pessoa recebe um e-mail assíncrono (`@Async`), cuja falha só aparece no log;
-  - curtir a si mesmo → 400; exige cadastro completo (403).
+  - curtir a si mesmo ou um perfil inexistente → 400; exige cadastro completo (403).
 - **Passar** (`POST /dislikes?destinoId=`): grava o dislike para a pessoa não voltar ao deck.
   - É idempotente e responde 204.
   - Para si mesmo ou para um perfil inexistente → 400.
@@ -135,43 +145,73 @@ endpoint recebe do front o id de quem está agindo.
 
 ### Fotos
 - **Enviar** (`POST /api/imagens/upload`, multipart):
-  - aceita só imagens de até 5 MB;
-  - comprime para 800×800;
-  - grava no R2 em `tinder_ufs/{pessoaId}/{uuid}.{ext}`;
+  - até 5 MB e no máximo **6 fotos ativas** por perfil;
+  - o tipo é descoberto pelos bytes do arquivo: só JPEG, PNG ou WebP. O Content-Type e o nome
+    enviados pelo cliente são ignorados;
+  - JPEG e PNG são decodificados e re-codificados em até 800×800, o que apaga metadados (EXIF
+    com GPS) e qualquer conteúdo embutido. Resolução acima de 8000 px por lado é recusada;
+  - WebP é guardado como veio, com Content-Type `image/webp`;
+  - grava no R2 em `tinder_ufs/{pessoaId}/{uuid}.{jpg|png|webp}`;
   - com `perfil=true`, a foto vira a principal. Sem nenhuma principal, a enviada assume.
 - **Listar e remover**: `GET /api/imagens/minhas-imagens` e `DELETE /api/imagens/{id}`.
   - A última foto não pode ser apagada.
   - Ao apagar a principal, a primeira foto ativa é promovida.
 - **Acesso** (`GET /api/imagens/proxy/**`): só o dono ou quem tem match. Responde 302 para uma
-  URL assinada do R2 (cache privado de 1 h).
+  URL assinada do R2 válida por 15 min (cache privado de 10 min).
   - Com `CF_R2_PUBLIC_URL` definida, as fotos do feed usam a URL pública direto.
 
 ### Tags
 - `GET /tags` e `GET /tags/ativas` são públicos.
-- `POST /tags` exige login.
-- `DELETE /tags/**` exige `ROLE_ADMIN`, papel que ninguém tem hoje.
+- `POST /tags` e `DELETE /tags/**` exigem `ROLE_ADMIN`, papel que ninguém tem hoje: as tags
+  são cadastradas direto no banco. O `POST` recebe `TagRequestDTO`, sem `id`.
 
 ## Segurança
 
+Revisada em 2026-11-16; o histórico dos riscos está em `docs/ARQUITETURA.md` (§5.7).
+
+### Autenticação
 - **`JwtFilter`**: valida o `Authorization: Bearer` em toda rota não pública e monta o
-  `SecurityContext`.
+  `SecurityContext`. Só a autenticação fica no `try`, então erros dos controllers não viram
+  "401 Token inválido".
+- **`JwtService`**: HS256, emissor `pairup-api`, `jti` aleatório, 15 min. Segredo com menos de
+  32 bytes impede a aplicação de subir.
+- **`SecurityUtils.getUserIdOrThrow()`**: é a única fonte do id de quem age (401 se ausente).
+- **Senhas**: BCrypt custo 12; 8 a 72 caracteres no cadastro.
+
+### Contra abuso
+- **`RateLimitFilter`** (por IP, janela de 1 min, em memória): 10 requisições em
+  `POST /users/login` e `POST /users`, 300 no resto. Excedeu → 429 com `Retry-After: 60`.
+- **`LoginAttemptService`** (por e-mail): 5 senhas erradas seguidas → bloqueio de 15 min.
+- **Login em tempo constante**: e-mail inexistente também roda um BCrypt.
+- **Upload**: tipo pelos bytes, re-codificação, limite de resolução e de 6 fotos.
+
+### Configuração HTTP
 - **`SecurityConfig`**:
-  - **Rotas públicas:** cadastro, login, OAuth2, Swagger e GET de tags.
-  - **Origens CORS:** ficam fixas no código.
-  - **Sessão:** stateless.
-- **`SecurityUtils.getUserIdOrThrow()`**: é a única fonte do id de quem age.
-- **Erros**: o `GlobalExceptionHandler` converte as exceções em respostas JSON.
+  - **Rotas públicas:** cadastro, login, OAuth2, `/error`, GET de tags e, só com
+    `SWAGGER_ENABLED=true`, o Swagger.
+  - **Origens CORS:** `CORS_ALLOWED_ORIGINS`, sem `*` e sem credenciais.
+  - **Sessão:** stateless. A sessão HTTP só guarda o `state` do OAuth2 e é invalidada no fim.
+  - **Cabeçalhos:** `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, HSTS (1 ano,
+    em HTTPS), `Referrer-Policy: no-referrer`, `Permissions-Policy`.
+  - **Respostas de segurança:** 401 `{"erro": "Não autenticado"}` e 403
+    `{"erro": "Acesso negado"}` em JSON (antes eram 302 para o Google).
+- **Erros**: o `GlobalExceptionHandler` converte as exceções em respostas JSON, sem mensagem
+  interna nem stack trace (`server.error.include-message: never`).
   - `ResponseStatusException` → o status dela.
   - `@Valid` → 400 com a lista de campos.
+  - JSON malformado, parâmetro ausente ou de tipo errado → 400 "Requisição inválida".
+  - Método não suportado → 405; Content-Type não suportado → 415; rota inexistente → 404.
   - Arquivo grande → 413.
-  - Resto → 500 genérico.
+  - Resto → 500 genérico (o nome da exceção só vai ao log).
+- **Logs**: valores vindos do cliente passam por `SecurityUtils.paraLog` (sem quebras de linha).
+- **Limites**: corpo multipart até 6 MB; formulário até 1 MB.
 
 ## Configuração
 
 | Variável | Para quê |
 |---|---|
 | `MONGODB_URI` | Conexão com o banco |
-| `JWT_SECRET` | Assina os tokens (mínimo 32 caracteres) |
+| `JWT_SECRET` | Assina os tokens (mínimo 32 bytes; gere com `openssl rand -base64 48`) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Login Google |
 | `BASE_URL` | Endereço público do back (redirect do OAuth) |
 | `FRONTEND_URL` | Endereço do front, uma única URL |
@@ -179,6 +219,10 @@ endpoint recebe do front o id de quem está agindo.
 | `CF_R2_PUBLIC_URL` | URL pública das fotos (necessária para o feed mostrar fotos) |
 | `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM` | E-mail de match (opcional) |
 | `PORT` | Porta HTTP (padrão 8080) |
+| `CORS_ALLOWED_ORIGINS` | Origens do front, separadas por vírgula (padrão `http://localhost:5173,https://pairup-flax.vercel.app`) |
+| `SWAGGER_ENABLED` | `true` liga o Swagger (padrão `false`) |
+| `RATE_LIMIT_ENABLED`, `RATE_LIMIT_AUTH`, `RATE_LIMIT_GERAL` | Limite por IP (padrão ligado, 10 e 300 por minuto) |
+| `MONGO_ROOT_USER`, `MONGO_ROOT_PASSWORD` | Usuário e senha do Mongo no `docker-compose` (senha obrigatória) |
 
 ## Rodar e testar
 
@@ -199,7 +243,7 @@ CLOUDFLARE_R2_PUBLIC_URL=http://localhost:9100/test-bucket mvn -B test
 docker stop pairup_test_mongo pairup_test_minio
 ```
 
-Na última execução, em 2026-11-15, rodaram 65 testes e nenhum falhou. As classes de teste são:
+Na última execução, em 2026-11-16, rodaram 80 testes e nenhum falhou. As classes de teste são:
 
 | Assunto | Classes |
 |---|---|
@@ -208,6 +252,7 @@ Na última execução, em 2026-11-15, rodaram 65 testes e nenhum falhou. As clas
 | Login Google | `OAuth2SuccessHandler` |
 | Dislike e exclusão em cascata | `DislikeEExclusaoTest` |
 | Documentação da API | `OpenApiDocs` |
+| Segurança (erros, JWT, cabeçalhos, validação, senha) | `SegurancaTest` |
 
 ## Limitações conhecidas
 
@@ -216,7 +261,11 @@ principais:
 - **Índices e transações:** os índices únicos não são criados (falta `auto-index-creation`), e
   `@Transactional` não tem efeito porque não há transaction manager nem replica set.
 - **Sessão:** o token dura 15 minutos e não é renovado.
-- **Login:** sem rate limit e sem confirmação de e-mail no cadastro local.
+- **Login:** sem confirmação de e-mail no cadastro local. O rate limit é em memória: com várias
+  réplicas, cada uma conta separado.
+- **Dependências:** Spring Boot 3.2.3 tem CVEs conhecidas. A atualização para 3.2.12 quebra a
+  consulta de fotos do feed por `@DBRef` e foi adiada (ver `docs/ARQUITETURA.md`, §5.7).
+- **Fotos públicas:** com `CF_R2_PUBLIC_URL`, quem tiver a URL de uma foto a vê sem login.
 - **Deploy:** o healthcheck do Docker chama `/actuator/health`, mas o actuator não está no
   projeto.
 - **Moderação:** sem denúncia e sem bloqueio de usuários.

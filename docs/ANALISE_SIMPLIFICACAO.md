@@ -1,5 +1,9 @@
 # PairUp: análise do código, da documentação e do que dá para simplificar
 
+> **Nota de 2026-11-16:** documento histórico. Desde então foram resolvidos, entre outros,
+> R33 (tags), R35 (upload), R36 (rate limit) e R38 (`destinoId`), e o callback do Google passou
+> a usar `#token=`. Estado atual dos riscos em `docs/ARQUITETURA.md` (§5.7).
+
 > Data: 2026-10-03 · Estado analisado: working tree atual (incluindo as mudanças ainda não commitadas).
 > Fonte: dois subagentes, rodados só em modo de análise (nenhum arquivo de código foi alterado):
 > - **Documentador**: verificou se o código faz sentido e se a documentação bate com ele.

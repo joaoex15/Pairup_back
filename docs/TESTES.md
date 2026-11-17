@@ -10,6 +10,45 @@
 > correção da interpretação do `302` de `/swagger-ui.html`, do comando de sobrescrita do S3
 > e da explicação dos containers Mongo.
 
+## Execução de 2026-11-16 — endurecimento de segurança
+
+- **Resultado: 80/80** (`mvn -o clean test`), contra Mongo (`localhost:27018`) e MinIO
+  (`localhost:9000`, bucket `test-bucket`) descartáveis. Nada foi gravado no banco do `.env`.
+- **Novo:** `shared/security/SegurancaTest` (13 testes):
+  - JSON malformado e enum inválido → 400 sem detalhes internos;
+  - token de outro emissor ou adulterado → 401; segredo curto impede a subida;
+  - erro de negócio do controller não vira 401;
+  - cabeçalhos `X-Frame-Options`, `nosniff`, `Referrer-Policy`, HSTS e ausência de cookie de
+    sessão;
+  - redes sociais maliciosas → 400 e válidas → 200; nascimento futuro ou em 1800 → 400; nome
+    com 500 caracteres → 400;
+  - cadastro com senha de 7 → 400; conta antiga com senha de 6 continua entrando.
+- **Alterados:**
+  - `ImagemControllerTest`: os uploads usam um JPEG real (bytes falsos agora são recusados) e
+    há um teste novo que envia SVG com `<script>` como `image/svg+xml` e espera 400.
+  - `TagControllerTest`: usuário comum não cria tag (403), sem token dá 401, e um `POST` com o
+    `id` de uma tag existente não a altera.
+  - `OAuth2SuccessHandlerTest`: o redirect esperado é `/auth/callback#token=...`.
+  - `PessoaControllerTest.testGetMeuPerfil`: o e-mail do perfil é o da conta, não o do corpo.
+  - Senhas de teste passaram de `123456` para `12345678` (mínimo de 8).
+- `application-test.yml` desliga o rate limit (os testes fazem muitas requisições do mesmo IP)
+  e liga o Swagger, usado por `OpenApiDocsTest`.
+- Spring Boot 3.2.12 foi testado: `PessoaControllerTest.testImagensDaListagemNaoExpoemDadosDaPessoa`
+  falha (o feed não acha as fotos pela consulta `@DBRef`). A versão voltou para 3.2.3.
+
+Como rodar:
+
+```bash
+docker run -d --rm --name pairup_test_mongo -p 127.0.0.1:27018:27017 mongo:7.0
+docker run -d --rm --name pairup_test_minio -p 127.0.0.1:9000:9000 \
+  -e MINIO_ROOT_USER=test-access-key -e MINIO_ROOT_PASSWORD=test-secret-key \
+  quay.io/minio/minio server /data
+docker run --rm --network host --entrypoint sh quay.io/minio/mc -c \
+  "mc alias set t http://127.0.0.1:9000 test-access-key test-secret-key && mc mb -p t/test-bucket"
+env -u MONGODB_URI SPRING_DATA_MONGODB_URI=mongodb://localhost:27018/PAIRUP_TEST mvn clean test
+docker stop pairup_test_mongo pairup_test_minio
+```
+
 ## Execução de 2026-11-02 — regressão do feed e documentação da API
 
 - **Resultado: 40/40** (`mvn -B clean package`), sem conexão a produção nos testes.

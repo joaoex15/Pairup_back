@@ -10,6 +10,8 @@ comunidade universitária. Só o backend — não há frontend neste repositóri
 - Likes, com match automático quando recíproco
 - Upload de fotos (Cloudflare R2), visíveis no feed antes do match; exige `CF_R2_PUBLIC_URL`
 - Redes sociais liberadas apenas entre pessoas com match
+- Segurança: rate limit por IP, bloqueio de login por e-mail, upload validado pelo conteúdo,
+  cabeçalhos de segurança e CORS configurável (detalhes em `docs/BACKEND.md`)
 
 ## Stack
 
@@ -36,7 +38,7 @@ Pré-requisitos: JDK 21, Maven e Docker.
 1. Crie um `.env` na raiz:
 
    ```
-   JWT_SECRET=            # mínimo 32 caracteres
+   JWT_SECRET=            # mínimo 32 bytes: openssl rand -base64 48
    GOOGLE_CLIENT_ID=
    GOOGLE_CLIENT_SECRET=
    BASE_URL=              # ex.: http://localhost:8080
@@ -51,6 +53,9 @@ Pré-requisitos: JDK 21, Maven e Docker.
    MAIL_USERNAME=
    MAIL_PASSWORD=
    MAIL_FROM=             # remetente; obrigatório para enviar
+   CORS_ALLOWED_ORIGINS=  # opcional, origens do front separadas por vírgula
+   SWAGGER_ENABLED=true   # só em dev; o padrão é false
+   MONGO_ROOT_PASSWORD=   # obrigatória para o docker-compose
    ```
 
 2. Suba a aplicação:
@@ -61,12 +66,12 @@ Pré-requisitos: JDK 21, Maven e Docker.
    mvn spring-boot:run
    ```
 
-3. Acesse o Swagger em `http://localhost:8080/swagger-ui.html`. Para testar rotas protegidas,
-   cole o token de `POST /users/login` no botão **Authorize**.
+3. Com `SWAGGER_ENABLED=true`, acesse o Swagger em `http://localhost:8080/swagger-ui.html`.
+   Para testar rotas protegidas, cole o token de `POST /users/login` no botão **Authorize**.
 
 ## Uso rápido da API
 
-- `POST /users` cria a conta; `POST /users/login` devolve o token.
+- `POST /users` cria a conta (senha de 8 a 72 caracteres); `POST /users/login` devolve o token.
 - Envie `Authorization: Bearer <token>` nas rotas protegidas (o token expira em 15 min).
 - Crie o perfil com `POST /pessoas` antes de usar likes, matches e upload.
 
@@ -77,8 +82,10 @@ Lista completa de endpoints em [`docs/REFERENCIA_FUNCOES.md`](docs/REFERENCIA_FU
 Os testes usam o perfil `test` (Mongo na porta 27018 e MinIO), sem tocar no banco real:
 
 ```bash
-mvn test
+SPRING_DATA_MONGODB_URI=mongodb://localhost:27018/PAIRUP_TEST mvn test
 ```
+
+Nunca rode `mvn test` sem esse ambiente: sem ele, o `.env` pode apontar para o banco real.
 
 Passo a passo para subir o ambiente de teste em [`docs/TESTES.md`](docs/TESTES.md).
 

@@ -18,6 +18,13 @@
 > estar deslocados em até 2 linhas. `PessoaService`, `ImagemService`, `SecurityUtils` e
 > `PessoaCompletaDTO` foram conferidos de novo.
 >
+> **2026-11-16 (endurecimento de segurança):** reescritas as entradas de `SecurityConfig`,
+> `OAuth2SuccessHandler`, `JwtFilter`, `JwtService`, `SecurityUtils`, `UserController`,
+> `UserService`, `TagController`, `ImageCompressionUtil` e partes de `ImagemService`/
+> `ImagemProxyController`; novas classes `RateLimitFilter`, `LoginAttemptService` e
+> `TagRequestDTO`. Nessas entradas os números de linha foram retirados (mudaram demais);
+> procure pelo nome do método.
+>
 > Visão de arquitetura, fluxos e riscos (códigos `R1`...`R45` citados aqui):
 > [`docs/ARQUITETURA.md`](ARQUITETURA.md).
 
@@ -31,8 +38,8 @@
   públicas: `JwtFilter.PUBLIC_ROUTES` (comparação por prefixo) e os `permitAll` do
   `SecurityConfig` (padrões de caminho do Spring). Rota fora da lista do `JwtFilter` e sem
   token → 401 em JSON `{"erro": "..."}` gerado pelo próprio filtro. Rota que o `JwtFilter`
-  deixa passar mas o `SecurityConfig` não libera (ex.: `/swagger-ui.html`) → **302 para
-  `/oauth2/authorization/google`** (entry point do `oauth2Login`).
+  deixa passar mas o `SecurityConfig` não libera → 401 JSON (entry point próprio); acesso
+  negado → 403 JSON. Desde 2026-11-16 não há mais redirect 302 para o Google nesses casos.
 - **Lombok**: `@Data` gera getters/setters/`equals`/`hashCode`/`toString`;
   `@AllArgsConstructor`/`@RequiredArgsConstructor` geram o construtor usado pelo Spring para
   injeção de dependências; `@Slf4j` cria o campo `log`.
@@ -79,38 +86,38 @@ varredura de componentes em `com.example.pairup.*`.
 
 ### SecurityConfig
 `shared/config/SecurityConfig.java` — `@Configuration @EnableWebSecurity`. Define a cadeia de
-segurança HTTP, o codificador de senha e o CORS. Dependências injetadas por campo
-(`@Autowired`): `OAuth2SuccessHandler`, `JwtFilter` (`:23-27`).
+segurança HTTP, o codificador de senha e o CORS. Dependências injetadas por campo:
+`OAuth2SuccessHandler`, `JwtFilter`, `RateLimitFilter`; propriedades `FRONTEND_URL`,
+`seguranca.cors.allowed-origins` e `springdoc.swagger-ui.enabled`.
 
-**`public SecurityFilterChain filterChain(HttpSecurity http) throws Exception`** (`:29-79`)
-- O que faz: desliga CSRF (API stateless), aplica CORS, sessão `STATELESS`, regras de
-  autorização, login OAuth2 com `OAuth2SuccessHandler` e insere o `JwtFilter` antes do
-  `UsernamePasswordAuthenticationFilter`.
-- Regras (`:38-70`): `permitAll` para `/users/login`, `/users`, `/oauth2/**`,
-  `/login/oauth2/**`, `/swagger-ui/**`, `/api-docs/**`, `/v3/api-docs/**`; `GET /tags` e
-  `/tags/ativas` públicos; `POST /tags` autenticado; `DELETE /tags/**` exige `ROLE_ADMIN`
-  (ninguém tem — R15); `/api/imagens/**`, `/pessoas/**`, `/likes/**`, `/matches/**` e
-  qualquer outra rota: autenticado.
-- Retorno: o `SecurityFilterChain` construído.
-- Observação: o `JwtFilter` tem **sua própria** lista de rotas públicas, que roda antes
-  destas regras (ver JwtFilter).
-- **Dispatch de `/error`**: quando o Spring responde com `sendError` (ex.: o
-  `AccessDeniedHandler` de `hasRole("ADMIN")`), o container reencaminha a requisição para
-  `/error`. Esse dispatch passa de novo pela cadeia de segurança, mas o `JwtFilter`
-  (`OncePerRequestFilter`) não roda outra vez e o `SecurityContext` dele não foi salvo — a
-  requisição de `/error` é anônima, `/error` não está em `permitAll`, e o entry point do
-  `oauth2Login` responde **302 para `/oauth2/authorization/google`**. Por isso
-  `DELETE /tags/{id}` responde 302, não 403 (R15). Vale para qualquer `sendError` em rota
-  autenticada; 4xx devolvidos via `ResponseEntity` pelos controllers não são afetados.
+**`public SecurityFilterChain filterChain(HttpSecurity http) throws Exception`**
+- Desliga CSRF, form login, HTTP Basic e logout (API só com Bearer token); sessão `STATELESS`.
+- Cabeçalhos: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, HSTS de 1 ano com
+  subdomínios (só em HTTPS), `Referrer-Policy: no-referrer` e `Permissions-Policy` sem
+  câmera/microfone/localização.
+- Regras: `OPTIONS /**`, `POST /users`, `POST /users/login`, `/oauth2/**`, `/login/oauth2/**`
+  e `/error` públicos; Swagger (`/swagger-ui.html`, `/swagger-ui/**`, `/api-docs`,
+  `/api-docs/**`, `/v3/api-docs/**`) público **só se** `SWAGGER_ENABLED=true`; `GET /tags` e
+  `GET /tags/ativas` públicos; qualquer outra rota de `/tags` exige `ROLE_ADMIN` (ninguém tem —
+  R15); o resto exige autenticação.
+- `exceptionHandling`: sem autenticação → 401 `{"erro": "Não autenticado"}`; acesso negado →
+  403 `{"erro": "Acesso negado"}`. Ambos escrevem a resposta direto (sem `sendError`), então
+  não há mais o redirect para o Google descrito antes em R15.
+- `oauth2Login`: sucesso → `OAuth2SuccessHandler`; falha → redirect para
+  `{FRONTEND_URL}/?erro=google_falhou`.
+- Ordem dos filtros: `RateLimitFilter` → `JwtFilter` → `UsernamePasswordAuthenticationFilter`.
 
-**`public PasswordEncoder passwordEncoder()`** (`:81-84`) — bean `BCryptPasswordEncoder`, usado
-por `UserService` para gerar e conferir hashes de senha.
+**`jwtFilterRegistration` / `rateLimitFilterRegistration`** — `FilterRegistrationBean`
+desligados: os dois filtros são `@Component` e, sem isso, o Spring Boot os registraria uma
+segunda vez fora da cadeia de segurança.
 
-**`public CorsConfigurationSource corsConfigurationSource()`** (`:86-108`) — CORS para `/**`:
-6 origens fixas (localhost 5173/3000/8080 e domínios Vercel/Railway), métodos
-GET/POST/PUT/DELETE/OPTIONS/PATCH, headers `Authorization`, `Content-Type`, `Accept`,
-`Origin`, expõe `Authorization`, credenciais permitidas, cache de preflight 1h. Não lê
-nenhuma propriedade (R17).
+**`public PasswordEncoder passwordEncoder()`** — `BCryptPasswordEncoder` com custo 12.
+
+**`public CorsConfigurationSource corsConfigurationSource()`** — CORS para `/**` com as
+origens de `CORS_ALLOWED_ORIGINS` (lista separada por vírgula; `*` é descartado; padrão
+`http://localhost:5173,https://pairup-flax.vercel.app`). Métodos GET/POST/PUT/DELETE/
+OPTIONS/PATCH, headers `Authorization`, `Content-Type`, `Accept`, **sem credenciais** (o front
+usa `credentials: 'omit'`), cache de preflight 1 h.
 
 ### CloudflareR2Config
 `shared/config/CloudflareR2Config.java` — cria os clientes AWS SDK v2 apontando para o endpoint
@@ -133,64 +140,79 @@ S3-compatível do Cloudflare R2. Lê `cloudflare.r2.endpoint`, `access-key`, `se
 `shared/config/OAuth2SuccessHandler.java` — `@Component` que estende
 `SimpleUrlAuthenticationSuccessHandler`; executado quando o login Google termina com sucesso.
 Dependências (por campo): `UserRepository`, `PessoaRepository`, `JwtService`; propriedade
-`FRONTEND_URL` (default `http://localhost:5173`, `:32-33`).
+`FRONTEND_URL` (default `http://localhost:5173`).
 
-**`public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response, Authentication authentication) throws IOException`** (`:35-71`)
-- O que faz: lê `email` e `name` do `OAuth2User`; busca `User` por e-mail ou cria um novo
-  (`password=null`, `provider="google"`); se não existir `Pessoa` para esse `User`, cria uma
-  mínima (nome, e-mail, `usuarioId`, `ativo=true`); gera JWT com `User.id`; redireciona para
-  `{FRONTEND_URL sem barra final}/auth/callback?token=<jwt>`.
-- Parâmetros: os padrões do Spring Security; `authentication.getPrincipal()` é o `OAuth2User`.
-- Retorno: nenhum (resposta HTTP 302).
-- Erros: exceções de repositório propagam; não há validação de idade/termos (R12). Se
-  `FRONTEND_URL` tiver várias URLs separadas por vírgula, o redirect fica inválido (R9).
-- Dependências: `UserRepository.findByEmail/save`, `PessoaRepository.findByUsuarioId/save`,
-  `JwtService.generateToken`.
+**`public void onAuthenticationSuccess(HttpServletRequest, HttpServletResponse, Authentication)`**
+- Invalida a sessão HTTP usada só para o `state` do OAuth2.
+- Exige `email` presente e `email_verified=true`; senão → `/?erro=email_nao_verificado`.
+- Normaliza o e-mail (trim + minúsculas).
+- Conta existente com `provider` diferente de `google` → `/?erro=conta_com_senha`, sem vincular.
+- Cria a conta Google e uma `Pessoa` mínima, se não existirem (R12/R31 continuam).
+- Redireciona para `{FRONTEND_URL}/auth/callback#token=<jwt>` — token no **fragmento**, que não
+  vai para o servidor do front, logs de proxy nem header `Referer`.
 
 ---
 
 ## Segurança
 
 ### JwtFilter
-`shared/security/JwtFilter.java` — `OncePerRequestFilter` registrado no `SecurityConfig`. Autentica
-cada requisição a partir do header `Authorization`. Dependências: `JwtService`,
+`shared/security/JwtFilter.java` — `OncePerRequestFilter` registrado no `SecurityConfig`.
+Autentica cada requisição a partir do header `Authorization`. Dependências: `JwtService`,
 `UserDetailsService` (implementado por `CustomUserDetailsService`).
 
-- `PUBLIC_ROUTES` (`:30-44`): pares (método, caminho) que não exigem token: `POST /users`,
-  `POST /users/login`, `GET /tags`, `GET /tags/ativas`, `GET /swagger-ui/**`,
-  `GET /v3/api-docs/**`, `GET /api-docs/**`, `GET|POST /oauth2/**`, `GET|POST /login/oauth2/**`.
-  Como a comparação é por prefixo (ver `isPublicRoute`), `GET /swagger-ui.html` **passa** pelo
-  filtro (começa com `/swagger-ui`); quem o bloqueia é o `SecurityConfig`, com 302 para o
-  OAuth (R8).
+- `PUBLIC_ROUTES`: `POST /users`, `POST /users/login`, `GET /tags`, `GET /tags/ativas`,
+  `GET /swagger-ui.html`, `GET /swagger-ui/**`, `GET /v3/api-docs/**`, `GET /api-docs`,
+  `GET /api-docs/**`, `GET /oauth2/**`, `GET|POST /login/oauth2/**`. Preflight `OPTIONS`
+  também passa sem token.
 
-**`protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)`** (`:48-115`)
-- Fluxo: rota pública → segue sem autenticar. Senão: sem `Bearer` → 401 "Token não
-  fornecido"; `isTokenValid` falso → 401 "Token inválido"; extrai `userId`, carrega
-  `UserDetails` (consulta ao banco), confere token x usuário → coloca
-  `UsernamePasswordAuthenticationToken` no `SecurityContextHolder` (principal = `UserDetails`
-  com `username = User.id`, sem authorities). Qualquer exceção (ex.: usuário apagado) → 401
-  "Token inválido ou expirado".
-- Erros: nunca lança; responde diretamente com JSON `{"erro": "..."}`.
+**`protected void doFilterInternal(...)`**
+- Rota pública → segue sem autenticar. Senão: sem `Bearer` → 401 "Token não fornecido";
+  token inválido, expirado, de outro emissor ou de conta apagada → 401 "Token inválido ou
+  expirado".
+- Só a autenticação fica dentro do `try`; o `filterChain.doFilter` roda **fora** dele. Antes,
+  qualquer exceção do controller virava "401 Token inválido".
 
 | Método privado | Descrição |
 |---|---|
-| `isPublicRoute(String method, String path)` (`:117-133`) | Compara método (case-insensitive) e caminho. Padrões terminados em `/**` perdem os 3 últimos caracteres e viram `path.startsWith(base)` — **sem exigir a barra**: `/swagger-ui/**` libera `/swagger-ui.html`, `/oauth2/**` liberaria `/oauth2qualquercoisa`, `/api-docs/**` libera `/api-docs`. Os demais exigem igualdade exata (`matchesPath`). |
-| `matchesPath(String routePath, String requestPath)` (`:135-137`) | Igualdade exata. |
-| `sendUnauthorizedResponse(HttpServletResponse, String)` (`:139-144`) | Escreve 401 + JSON montado com `String.format` (sem escape de aspas). |
+| `isPublicRoute(String method, String path)` | Método case-insensitive. Padrões `/**` viram prefixo **com a barra** (`/swagger-ui/**` → `/swagger-ui/`), então `/oauth2qualquercoisa` não passa mais. Demais: igualdade exata. |
+| `sendUnauthorizedResponse(HttpServletResponse, String)` | 401 + `{"erro": "..."}` (mensagens fixas). |
 
 ### JwtService
 `shared/security/JwtService.java` — gera e valida JWT HS256 com a chave `jwt.secret`
-(`JWT_SECRET`). Expiração fixa `EXPIRATION_MS = 15 min` (`:22`).
+(`JWT_SECRET`). Expiração fixa de 15 min, emissor `pairup-api`, tolerância de relógio de 30 s.
 
 | Método | O que faz | Retorno / Erros |
 |---|---|---|
-| `private Key getKey()` (`:24-34`) | Converte `SECRET` em chave HMAC. | `IllegalStateException` se a chave tiver menos de 32 caracteres ou for nula. |
-| `public String generateToken(String userId)` (`:39-52`) | Cria token com `sub=userId`, `iat`, `exp=agora+15min`. Chamado por `UserController.login` e `OAuth2SuccessHandler`. | Token compacto. |
-| `public String extractUserId(String token)` (`:57-90`) | Faz o parse e devolve o `subject`. | `null` se token vazio, expirado, malformado, com assinatura inválida etc. (nunca lança). |
-| `public boolean isTokenValid(String token)` (`:95-126`) | Valida estrutura, assinatura e expiração. | `true`/`false`. |
-| `public boolean isTokenValid(String token, UserDetails userDetails)` (`:131-162`) | Confere se o `subject` é o `username` do `UserDetails` e se não expirou. | `true`/`false`. |
-| `private boolean isTokenExpired(String token)` (`:167-182`) | Compara `exp` com agora. | `true` se expirado ou ilegível. |
-| `public Date getExpirationDate(String token)` (`:187-203`) | Lê `exp`. Só usado internamente. | `Date` ou `null`. |
+| `void init()` (`@PostConstruct`) | Monta a chave HMAC uma vez, em UTF-8. | `IllegalStateException` na **subida** se o segredo for nulo ou tiver menos de 32 bytes (R41 resolvido). |
+| `public String generateToken(String userId)` | Token com `jti` aleatório, `iss=pairup-api`, `sub=userId`, `iat`, `exp=agora+15min`. | Token compacto. |
+| `private Claims parse(String token)` | Valida assinatura, expiração e emissor (`requireIssuer`). | `Claims` ou `null`. |
+| `public String extractUserId(String token)` | `subject` do token válido. | `null` se inválido (nunca lança). |
+| `public boolean isTokenValid(String token)` | Token válido? | `true`/`false`. |
+| `public boolean isTokenValid(String token, UserDetails)` | Token válido e `subject` igual ao `username`. | `true`/`false`. |
+| `public Date getExpirationDate(String token)` | Lê `exp`. | `Date` ou `null`. |
+
+### RateLimitFilter
+`shared/security/RateLimitFilter.java` — `OncePerRequestFilter`, roda antes do `JwtFilter`.
+Janela fixa de 1 minuto por IP (`request.getRemoteAddr()`, já resolvido pelo Tomcat a partir
+do `X-Forwarded-For` confiável), em memória.
+
+- `POST /users/login` e `POST /users`: `seguranca.rate-limit.auth-por-minuto` (padrão 10,
+  `RATE_LIMIT_AUTH`).
+- Demais rotas: `seguranca.rate-limit.geral-por-minuto` (padrão 300, `RATE_LIMIT_GERAL`).
+- Excedeu → 429, `Retry-After: 60`, `{"erro": "Muitas requisições..."}`.
+- `seguranca.rate-limit.habilitado=false` desliga (usado nos testes). Limite de 100 mil
+  chaves; acima disso as janelas expiradas são removidas. Com várias réplicas, cada uma conta
+  separado.
+
+### LoginAttemptService
+`shared/security/LoginAttemptService.java` — bloqueio por **e-mail**, complementar ao limite
+por IP.
+
+| Método | Descrição |
+|---|---|
+| `boolean estaBloqueado(String email)` | `true` durante o bloqueio. |
+| `void registrarFalha(String email)` | Conta falhas seguidas; na 5ª (`seguranca.login.max-falhas`) bloqueia por 15 min (`bloqueio-minutos`). Falhas mais antigas que a janela não acumulam. |
+| `void registrarSucesso(String email)` | Zera o contador. |
 
 ### CustomUserDetailsService
 `shared/security/CustomUserDetailsService.java` — implementa `UserDetailsService` para o Spring
@@ -203,12 +225,13 @@ Security. Dependência: `UserRepository`.
 - Erros: `UsernameNotFoundException` se o id não existe (o `JwtFilter` converte em 401).
 
 ### SecurityUtils
-`shared/security/SecurityUtils.java` — utilitário estático para obter o usuário logado.
+`shared/security/SecurityUtils.java` — utilitário estático (classe `final`, construtor privado).
 
 | Método | Descrição |
 |---|---|
-| `public static String getCurrentUserId()` (`:9-16`) | Lê o `SecurityContextHolder`; devolve `UserDetails.getUsername()` (= `User.id`) ou `null`. |
-| `public static String getUserIdOrThrow()` (`:18-24`) | Igual, mas lança `RuntimeException("Usuário não autenticado")` se `null`. Na prática não lança em rotas protegidas, porque o `JwtFilter` já barrou quem não tem token. |
+| `public static String getCurrentUserId()` | `UserDetails.getUsername()` (= `User.id`) do `SecurityContextHolder`, ou `null`. |
+| `public static String getUserIdOrThrow()` | Igual, mas lança `ResponseStatusException(401)` se `null` (antes era `RuntimeException`, que virava 500). |
+| `public static String paraLog(String valor)` | Troca `\r`, `\n` e `\t` por `_` e corta em 100 caracteres, para valores do cliente irem ao log sem forjar linhas. |
 
 ---
 
@@ -219,45 +242,43 @@ geradas pelo `JwtFilter` antes de o controller rodar.
 
 ### UserController
 `user/UserController.java` — `@RequestMapping("/users")`. Conta do usuário. Dependências:
-`UserService`, `JwtService`.
+`UserService`, `JwtService`, `LoginAttemptService`.
 
-**`GET /users/me` — Auth — `getMe()`** (`:36-55`)
-- Devolve o `User` logado com `password=null`. 404 se o usuário não existe; qualquer exceção → 401
-  `{"erro": "Usuário não autenticado"}`.
-- Chama `SecurityUtils.getUserIdOrThrow`, `UserService.findById`.
+**`GET /users/me` — Auth — `getMe()`**
+- Devolve o `User` logado com `password=null`; 404 se o usuário não existe.
 
-**`POST /users/login` — público — `login(@RequestBody @Valid LoginRequestDTO)`** (`:60-84`)
-- Corpo: `{"email", "password"}`. Sucesso → 200 `{"token", "userId", "email"}`. Falha → 401
-  `{"erro": "Credenciais inválidas."}`. Registra log `[AUDIT]`.
-- Chama `UserService.login`, `JwtService.generateToken`.
+**`POST /users/login` — público — `login(@RequestBody @Valid LoginRequestDTO)`**
+- Corpo `{"email", "password"}` (obrigatórios; e-mail até 254, senha até 128 caracteres).
+- E-mail bloqueado pelo `LoginAttemptService` → 429 `{"erro": "Muitas tentativas..."}`.
+- Sucesso → 200 `{"token", "userId", "email"}` e zera as falhas. Falha → 401
+  `{"erro": "Credenciais inválidas."}` e conta uma falha. O e-mail vai ao log pelo
+  `SecurityUtils.paraLog`.
 
-**`POST /users` — público — `createUser(@RequestBody @Valid User)`** (`:89-105`)
-- Corpo: entidade `User` (`nome`, `email`, `password`; aceita também `id`/`provider` — R1).
-- 200 com o `User` criado (sem senha). `IllegalArgumentException` → 409 `{"erro": msg}` (inclui
-  "Email já cadastrado" e o caso de senha nula — R14). `@Email`/`@NotBlank` no e-mail → 400 pelo
-  `GlobalExceptionHandler`.
-- Chama `UserService.createUser`.
+**`POST /users` — público — `createUser(@RequestBody @Valid UserCreateDTO)`**
+- Corpo `{nome?, email, password}`: nome até 100, e-mail válido até 254, senha de **8 a 72**.
+  O DTO não tem `id` nem `provider` (R1 resolvido).
+- 200 com o `User` criado (sem senha); e-mail já usado → 409; validação → 400.
 
-**`PUT /users/me` — Auth — `updateMe(@RequestBody @Valid User)`** (`:110-130`)
-- Atualiza só `nome` e `email` (o resto do corpo é ignorado). 200 com o usuário; 404 se não existe;
-  **qualquer** exceção (inclusive "e-mail já cadastrado") → 401 `{"erro": "Usuário não autenticado"}`.
-- Atenção: `@Valid User` exige `email` válido e não vazio mesmo para atualizar só o nome.
-- Chama `UserService.updateUser`.
+**`PUT /users/me` — Auth — `updateMe(@RequestBody @Valid UserUpdateDTO)`**
+- Corpo `{nome?, email?, senhaAtual?}`. Trocar o e-mail exige `senhaAtual` (403 se errada);
+  e-mail de outra conta → 409; conta Google → 400. Erros de negócio saem pelo
+  `GlobalExceptionHandler` (não viram 401).
 
-**`DELETE /users/me` — Auth — `deleteMe()`** (`:135-150`)
-- Apaga o documento `User` → 204. Não apaga `Pessoa`/imagens/likes/matches (R10). Exceção → 401.
-- Chama `UserService.deleteUser`.
+**`DELETE /users/me` — Auth — `deleteMe()`**
+- Apaga o perfil (em cascata) e a conta → 204.
 
 ### PessoaController
 `pessoa/PessoaController.java` — `@RequestMapping("/pessoas")`. Perfil de paquera. Todas as
-rotas Auth. Dependência: `PessoaService`. Erros próprios usam a chave `"error"` (em inglês).
+rotas Auth. Dependências: `PessoaService`, `UserRepository`. Erros próprios usam a chave
+`"error"` (em inglês). Erro de banco (`DataAccessException`) → 409 com mensagem genérica, sem
+detalhes internos.
 
 **`GET /pessoas` — `getAll(Interesse interesse, Genero genero, Pageable pageable)`** (`:32-49`)
 - Query params opcionais `interesse` (`HOMENS|MULHERES|TODOS|NAO_DEFINIDO`), `genero`
   (`MASCULINO|FEMININO|NAO_BINARIO|OUTRO`), `page`, `size` (default 20), `sort`.
 - Retorna `Page<PessoaPerfilDTO>` só de perfis `ativo=true`, **incluindo o próprio
   solicitante**; `cienciaResponsabilidade` vem sempre `false` (R39). Valor de enum inválido
-  cai no handler genérico (500 — R16).
+  → 400 "Requisição inválida" (desde 2026-11-16).
 - Chama `PessoaService.getAllPerfisWithFilters`.
 
 **`GET /pessoas/{id}/perfil` — `getPerfilById(String id)`** (`:51-67`)
@@ -267,31 +288,31 @@ rotas Auth. Dependência: `PessoaService`. Erros próprios usam a chave `"error"
 **`GET /pessoas/{id}/redes-sociais` — `getRedesSociaisById(String id)`** (`:69-77`)
 - Stub: sempre 403 sem corpo. O caminho correto é `GET /matches/{matchId}/redes-sociais`.
 
-**`POST /pessoas` — `create(@RequestBody @Valid PessoaPerfilDTO)`** (`:79-128`)
-- Corpo útil: `nome`, `curso`, `dataNasc` (`yyyy-MM-dd`), `email`, `genero`, `interesse`,
-  `descricao`, `cienciaResponsabilidade`. Ignora `id`, `tags`, `imagens`, `fotoPerfilUrl`.
+**`POST /pessoas` — `create(@RequestBody @Valid PessoaRequestDTO)`**
+- Corpo: `nome`, `curso`, `dataNasc` (`yyyy-MM-dd`), `genero`, `interesse`, `descricao`,
+  `instagram`, `whatsapp`, `telegram`, `tags` (IDs), `cienciaResponsabilidade`. O campo `email`
+  é **ignorado**: o perfil usa o e-mail da conta autenticada (antes dava para "reservar" o
+  e-mail de outra pessoa).
 - Regras: `cienciaResponsabilidade` precisa ser `true` (400); se o usuário já tem perfil → 409;
-  o service exige 18+ anos, e-mail de perfil único e um perfil por usuário (violações → 400).
+  o service exige 18+ anos e data de nascimento a no máximo 100 anos (violações → 400).
 - Retorna 200 com a **entidade** `Pessoa` criada (inclui `usuarioId`).
-- Chama `PessoaService.findByUsuarioId`, `PessoaService.create`.
 
 **`GET /pessoas/me` — `getMyProfile()`** (`:130-147`)
 - 200 com `PessoaCompletaDTO` (inclui redes sociais e imagens) ou 404.
 - Chama `PessoaService.getPessoaCompletaByUsuarioId`.
 
-**`PUT /pessoas/me` — `updateMe(@RequestBody @Valid PessoaPerfilDTO)`** (`:149-187`)
-- Merge parcial: só aplica campos não nulos entre `nome`, `curso`, `dataNasc`, `genero`,
-  `interesse`, `descricao`. Não altera `email`, tags nem redes sociais.
+**`PUT /pessoas/me` — `updateMe(@RequestBody @Valid PessoaRequestDTO)`**
+- Merge parcial: só aplica campos não nulos. String vazia apaga uma rede social; lista vazia
+  remove as tags. Não altera `email` nem `cienciaResponsabilidade`.
 - 200 com a entidade atualizada; 404 sem perfil; `RuntimeException` do service (ex.: menor de
   idade) → 400.
-- Chama `PessoaService.findByUsuarioId`, `PessoaService.update`.
 
 **`PATCH /pessoas/me/ciencia-responsabilidade` — `marcarCienciaResponsabilidade()`** (`:189-213`)
 - Marca `cienciaResponsabilidade=true`. 200 com a entidade; 404 sem perfil; 400 em erro.
 - Chama `PessoaService.marcarCienciaResponsabilidade`.
 
 **`DELETE /pessoas/me` — `deleteMe()`** (`:215-230`)
-- Apaga o perfil (se existir) → sempre 204. Não apaga imagens/likes/matches (R10).
+- Apaga o perfil (se existir) e, em cascata, fotos, likes, dislikes e matches → sempre 204.
 - Chama `PessoaService.delete`.
 
 ### LikeController
@@ -302,7 +323,9 @@ Todas as rotas convertem o `User.id` do JWT em `Pessoa.id` com
 `PessoaService.getPessoaIdOrThrow` (sem perfil → 400).
 
 **`POST /likes?destinoId=<Pessoa.id>` — `darLike(String destinoId)`** (`:59-83`)
-- Auto-like → 400. Já curtiu → 400 (vindo do service). Não verifica se `destinoId` existe.
+- `destinoId` vazio, com mais de 64 caracteres ou de perfil inexistente → 400 "Perfil
+  inválido" (R38 resolvido). Auto-like → 400. Já curtiu → 400 (vindo do service). Exige
+  cadastro completo (403).
 - Retorna 200 `{"match": true|false, "message": "..."}`.
 - Chama `PessoaService.getPessoaIdOrThrow`, `LikeService.darLike`.
 
@@ -340,8 +363,8 @@ Mesma conversão de `LikeController` (`PessoaService.getPessoaIdOrThrow`).
 |---|---|---|---|
 | `GET /tags` | `getAll()` (`:32-36`) | público | Lista todas as tags (`List<Tag>`). |
 | `GET /tags/ativas` | `getAtivas()` (`:42-46`) | público | Lista tags com `ativa=true`. |
-| `POST /tags` | `create(@RequestBody @Valid Tag)` (`:52-78`) | Auth (qualquer usuário) | Corpo `{nome, descricao, categoria, ativa}`; `nome`/`categoria` obrigatórios (400). 200 com a tag. **Qualquer** exceção → 401 "Autenticação necessária..." (R20). Aceita `id` no corpo e sobrescreve a tag existente; sem `ativa`, a tag é criada com `ativa=false` (R33). |
-| `DELETE /tags/{id}` | `delete(String id)` (`:84-102`) | `ROLE_ADMIN` | Nunca executa: o Spring Security nega antes, e por causa do dispatch de `/error` o cliente recebe **302 para `/oauth2/authorization/google`**, não 403 (R15). Se executasse, só responderia 403. |
+| `POST /tags` | `create(@RequestBody @Valid TagRequestDTO)` | `ROLE_ADMIN` | Corpo `{nome, descricao?, categoria, ativa}` (nome e categoria até 50, descrição até 200; `ativa` padrão `true`). O DTO não tem `id`, então não sobrescreve tag existente (R33 resolvido). Usuário comum → 403; sem token → 401. |
+| `DELETE /tags/{id}` | `delete(String id)` | `ROLE_ADMIN` | Nunca executa: o Spring Security nega antes com 403 JSON. |
 
 ### ImagemController
 `imagem/ImagemController.java` — `@RequestMapping("/api/imagens")`. Todas Auth.
@@ -351,8 +374,10 @@ Dependências: `ImagemService`, `PessoaService`. Sem anotações Swagger. Respos
 **`POST /api/imagens/upload` — `uploadImagem(@Valid @ModelAttribute ImagemUploadDTO)`** (`:27-69`)
 - Requisição `multipart/form-data` com campos `file` (imagem) e `perfil` (`true`/`false`).
 - 200 com `{id, url: "/api/imagens/proxy/<publicId>", nomeOriginal, perfil, tamanhoBytes, sucesso: true, mensagem}`.
-- 400 sem perfil, arquivo vazio, MIME não-imagem ou > 5 MB (`IllegalArgumentException`);
-  403 em `SecurityException`; 500 com a mensagem da exceção em outros erros (ex.: R2 fora do ar).
+- 400 sem perfil, arquivo vazio, > 5 MB, conteúdo que não é JPEG/PNG/WebP, resolução acima
+  de 8000 px por lado ou limite de 6 fotos atingido (`IllegalArgumentException`); 403
+  "Acesso negado" em `SecurityException`; 500 com mensagem genérica em outros erros (a
+  mensagem da exceção não vai mais ao cliente).
 - Chama `PessoaService.findByUsuarioId`, `ImagemService.salvarImagem`.
 
 **`DELETE /api/imagens/{imagemId}` — `deletarImagem(String imagemId)`** (`:71-108`)
@@ -377,8 +402,9 @@ Dependências: `ImagemService`, `PessoaService`, `MatchService`, `AuditLogServic
 **`private ResponseEntity<Void> proxyImagem(String publicId)`** (`:51-105`)
 - 400 se o formato do id for inválido; 404 se a imagem não existe ou não tem dono; 410 se
   inativa; 403 se o solicitante não tem perfil ou não é dono nem tem match ativo com o dono;
-  sucesso → **302** com `Location` = URL pré-assinada (1h) e `Cache-Control: private,
-  max-age=3600`. Qualquer outra exceção → 500.
+  sucesso → **302** com `Location` = URL pré-assinada (15 min) e `Cache-Control: private,
+  max-age=600`. Qualquer outra exceção → 500. O dono é lido por `Imagem.idDoDono()`, sem
+  carregar a `Pessoa`; o `publicId` só vai ao log já sanitizado.
 - Chama `ImagemService.findByPublicId`, `PessoaService.findByUsuarioId`,
   `MatchService.existeMatchAtivo`, `AuditLogService.logImageAccess`,
   `ImagemService.gerarUrlPresignada`.
@@ -393,15 +419,18 @@ Dependências: `ImagemService`, `PessoaService`, `MatchService`, `AuditLogServic
 ## Services
 
 ### UserService
-`user/UserService.java` — regras da conta. Dependências: `UserRepository`, `PasswordEncoder`.
+`user/UserService.java` — regras da conta. Dependências: `UserRepository`, `PasswordEncoder`,
+`PessoaService`. No construtor gera um hash BCrypt falso usado no login.
 
 | Método | O que faz | Retorno / Erros |
 |---|---|---|
-| `public User findById(String id)` (`:16-18`) | Busca por id. | `User` ou `null`. |
-| `public User createUser(User user)` (`:20-26`) | Rejeita e-mail já existente; aplica BCrypt na senha; salva. Salva o objeto recebido como está (se vier `id`, sobrescreve — R1). | `User` salvo. `IllegalArgumentException("Email já cadastrado")`; `IllegalArgumentException` do BCrypt se senha `null`. |
-| `public User updateUser(String id, User userUpdates)` (`:28-46`) | Copia `nome`/`email` não nulos para o usuário existente e salva. | `User` atualizado ou `null` se não existe. Converte `DuplicateKeyException` em `IllegalArgumentException` (só ocorre se o índice único existir — R4). |
-| `public void deleteUser(String id)` (`:48-50`) | `deleteById`. | — |
-| `public User login(String email, String password)` (`:52-61`) | Busca por e-mail e confere a senha com BCrypt. | `User`. `BadCredentialsException` se e-mail inexistente ou senha errada (contas Google, sem senha, sempre falham). |
+| `public static String normalizarEmail(String)` | `trim` + minúsculas. | `String` ou `null`. |
+| `public User findById(String id)` | Busca por id (`null` → `null`). | `User` ou `null`. |
+| `private Optional<User> buscarPorEmail(String)` | Busca pelo e-mail normalizado e, se não achar, pelo original (contas antigas com maiúsculas). | `Optional<User>`. |
+| `public User createUser(UserCreateDTO)` | Recusa e-mail já usado; grava e-mail normalizado e senha em BCrypt. | `User`; `IllegalArgumentException("Email já cadastrado")` (também em `DuplicateKeyException`). |
+| `public User updateUser(String id, UserUpdateDTO)` | Atualiza nome; troca de e-mail exige senha atual. | `User` ou `null`; `ResponseStatusException` 400/403/409. |
+| `public void deleteUser(String id)` | Apaga o perfil (cascata) e a conta. | — |
+| `public User login(String email, String password)` | Sempre roda **um** BCrypt (contra o hash falso quando o e-mail não existe ou a conta é Google), para o tempo de resposta não revelar quais e-mails têm conta. | `User`; `BadCredentialsException` em qualquer falha. |
 
 ### PessoaService
 `pessoa/PessoaService.java` — regras do perfil e montagem de DTOs. Dependências:
@@ -480,12 +509,16 @@ Dependências: `ImagemRepository`, `PessoaRepository`, `ImageCompressionUtil`, `
 
 | Outros métodos | O que faz | Retorno / Erros |
 |---|---|---|
-| `public String gerarUrlPresignada(String publicId)` (`:132-139`) | URL GET pré-assinada válida por 1h. | `String`. |
+| `public String gerarUrlPresignada(String publicId)` | URL GET pré-assinada válida por 15 min (`VALIDADE_URL`). | `String`. |
 | `public Imagem findByPublicId(String publicId)` (`:141-145`) | Busca pela chave. | `Imagem`; `IllegalArgumentException` se não existe. |
 | `public List<Imagem> listarImagensAtivasPorUsuario(String pessoaId)` (`:147-150`) | Imagens ativas da pessoa (o nome diz "usuario" mas recebe `Pessoa.id`). | Lista. |
 | `private resolverUrl(String key)` (`:152-157`) | `public-url/key` se configurado; senão `/api/imagens/proxy/key`. | — |
-| `private validarArquivo(MultipartFile)` (`:159-170`) | Não vazio, `image/*`, ≤ 5 MB. | `IllegalArgumentException`. |
-| `private getExtensao(String)` (`:172-175`) | Extensão em minúsculas ou `jpg`. | — |
+| `private validarArquivo(MultipartFile)` | Não vazio e ≤ 5 MB. O tipo é checado pelo conteúdo em `ImageCompressionUtil.processar`. | `IllegalArgumentException`. |
+
+`salvarImagem` (2026-11-16): recusa a 7ª foto ativa (`MAX_FOTOS = 6`); chama
+`ImageCompressionUtil.processar` **antes** de enviar ao R2 e usa a extensão e o Content-Type
+que ele devolve (nunca os do cliente); grava no R2 com `Content-Disposition: inline` e
+`Cache-Control: private, max-age=86400`. Não existe mais fallback para os bytes originais.
 
 ### AuditLogService
 `imagem/AuditLogService.java` — "auditoria" que apenas escreve no log (nada é persistido).
@@ -609,12 +642,39 @@ em `GET /pessoas` e como campos de `Pessoa`/DTOs (o JSON usa o nome exato da con
 ## DTOs
 
 ### LoginRequestDTO
-`user/LoginRequestDTO.java` — `{email, password}` para `POST /users/login`. Sem anotações de
-validação (o `@Valid` do controller não verifica nada).
+`user/LoginRequestDTO.java` — `{email, password}` para `POST /users/login`. Ambos
+`@NotBlank`; e-mail até 254 e senha até 128 caracteres.
+
+### UserCreateDTO / UserUpdateDTO
+`user/UserCreateDTO.java` — `{nome (até 100), email (@Email, até 254), password (8 a 72)}`.
+`user/UserUpdateDTO.java` — `{nome (até 100), email (@Email, até 254), senhaAtual (até 128)}`.
+
+### PessoaRequestDTO
+`pessoa/PessoaRequestDTO.java` — entrada de `POST /pessoas` e `PUT /pessoas/me`.
+
+| Campo | Validação |
+|---|---|
+| `nome` | até 100 |
+| `curso` | até 150 |
+| `dataNasc` | `@Past` |
+| `email` | até 254; ignorado pelo controller |
+| `descricao` | até 500 |
+| `instagram` | vazio ou `@?[A-Za-z0-9._]{1,30}` |
+| `whatsapp` | vazio ou 8 a 20 de dígitos, espaço, `(`, `)`, `+`, `-` |
+| `telegram` | vazio ou `@?[A-Za-z0-9_]{1,32}` |
+| `tags` | até 5 IDs |
+
+As redes sociais aceitam só o usuário/número: o front monta o link com prefixo fixo
+(`instagram.com/`, `t.me/`, `wa.me/55`), então nada além de letras, números, ponto e
+sublinhado chega ao `href`.
+
+### TagRequestDTO
+`tag/TagRequestDTO.java` — entrada de `POST /tags`: `nome` (obrigatório, até 50), `descricao`
+(até 200), `categoria` (obrigatória, até 50), `ativa` (padrão `true`). Não tem `id`.
 
 ### PessoaPerfilDTO
-`pessoa/PessoaPerfilDTO.java` — usado **como entrada** (`POST`/`PUT /pessoas`) e **como saída**
-(`GET /pessoas`, `GET /pessoas/{id}/perfil`). Campos: `id`, `nome`, `curso`, `dataNasc`,
+`pessoa/PessoaPerfilDTO.java` — só **saída** (`GET /pessoas`, `GET /pessoas/{id}/perfil`); a
+entrada é `PessoaRequestDTO`. Campos: `id`, `nome`, `curso`, `dataNasc`,
 `email`, `genero`, `interesse`, `descricao`, `tags` (nomes), `cienciaResponsabilidade`,
 `imagens` (`List<Imagem>` — entidades completas), `fotoPerfilUrl`. Sem validações (R19). Não
 tem redes sociais.
@@ -669,14 +729,17 @@ capturadas pelos controllers em JSON `{status, erro, timestamp}`.
 ## Utilitários
 
 ### ImageCompressionUtil
-`imagem/ImageCompressionUtil.java` — `@Component` que redimensiona e comprime imagens com
-Thumbnailator. Configurável por `file.compress.width` (800), `height` (800), `quality` (0.7)
-(`:14-24`).
+`imagem/ImageCompressionUtil.java` — `@Component` que valida e normaliza fotos.
+Configurável por `file.compress.width` (800), `height` (800), `quality` (0.7).
 
 | Método | Descrição |
 |---|---|
-| `public byte[] compressImage(MultipartFile file) throws IOException` (`:33-43`) | Encaixa a imagem em 800x800 mantendo proporção e aplica a qualidade; devolve os bytes. Lança `IOException`/exceções do Thumbnailator para arquivos que não são imagem (o `ImagemService` captura e usa os bytes originais). |
-| `private String getFormat(String filename)` (`:49-56`) | `png`/`gif` mantêm o formato; todo o resto vira `jpg` (atenção: o `contentType` e a extensão salvos continuam os originais — um `.webp` vira bytes JPG com chave `.webp`). |
+| `public ImagemProcessada processar(byte[] original)` | Detecta o formato pelos bytes. JPEG/PNG: confere a resolução pelo cabeçalho (máx. 8000 px por lado e 40 MP), decodifica e re-codifica em até 800×800 (remove EXIF/GPS e conteúdo embutido), com no máximo 2 decodificações simultâneas. WebP: bytes originais (o Java não decodifica WebP). Devolve bytes + `Formato`. `IllegalArgumentException` se não for imagem válida. |
+| `static Formato detectarFormato(byte[])` | Magic number: `FF D8 FF` (JPEG), `89 PNG \r\n 1A \n` (PNG), `RIFF....WEBP` (WebP); senão `null`. |
+| `private void validarDimensoes(byte[])` | Lê só largura/altura com `ImageReader`, sem decodificar os pixels (contra *decompression bomb*). |
+
+Tipos: `enum Formato { JPEG, PNG, WEBP }` com `extensao` e `mimeType`; `record
+ImagemProcessada(byte[] bytes, Formato formato)`.
 
 ---
 
@@ -705,12 +768,14 @@ Thumbnailator. Configurável por `file.compress.width` (800), `height` (800), `q
 | PUT | `/matches/desfazer/{matchId}` | Bearer | `MatchController.desfazerMatch` | 200 texto |
 | GET | `/tags` | público | `TagController.getAll` | 200 `List<Tag>` |
 | GET | `/tags/ativas` | público | `TagController.getAtivas` | 200 `List<Tag>` |
-| POST | `/tags` | Bearer | `TagController.create` | 200 `Tag` |
-| DELETE | `/tags/{id}` | `ROLE_ADMIN` (inexistente) | `TagController.delete` | nunca; responde 302 para `/oauth2/authorization/google` (R15) |
+| POST | `/tags` | `ROLE_ADMIN` (inexistente) | `TagController.create` | 403 para usuários comuns |
+| DELETE | `/tags/{id}` | `ROLE_ADMIN` (inexistente) | `TagController.delete` | nunca; 403 JSON |
 | POST | `/api/imagens/upload` | Bearer | `ImagemController.uploadImagem` | 200 `ImagemUploadResponseDTO` |
 | DELETE | `/api/imagens/{imagemId}` | Bearer | `ImagemController.deletarImagem` | 200 `ImagemUploadResponseDTO` |
 | GET | `/api/imagens/minhas-imagens` | Bearer | `ImagemController.listarMinhasImagens` | 200 lista |
 | GET | `/api/imagens/proxy/{publicId}` | Bearer | `ImagemProxyController.proxyImagemHandler` | 302 para URL pré-assinada |
 | GET | `/oauth2/authorization/google` | público | Spring Security | 302 para o Google |
-| GET | `/login/oauth2/code/google` | público | Spring Security → `OAuth2SuccessHandler` | 302 para `${FRONTEND_URL}/auth/callback?token=` |
-| GET | `/api-docs`, `/swagger-ui/index.html` | público | springdoc | spec / UI (`/swagger-ui.html` recebe 302 para `/oauth2/authorization/google` — R8) |
+| GET | `/login/oauth2/code/google` | público | Spring Security → `OAuth2SuccessHandler` | 302 para `${FRONTEND_URL}/auth/callback#token=` (falha → `/?erro=google_falhou`) |
+| GET | `/api-docs`, `/swagger-ui.html` | público só com `SWAGGER_ENABLED=true` | springdoc | spec / UI; desligado → 401 |
+
+Qualquer rota pode responder **429** quando o IP passa do limite do `RateLimitFilter`.

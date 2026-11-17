@@ -7,6 +7,11 @@
 > Data desta análise: 2026-10-03 (revisão de conteúdo no mesmo dia, após a reorganização
 > de pacotes). Substitui o snapshot de 2026-08-28.
 >
+> **Atualização de 2026-11-16 (segurança):** resolvidos R9, R14, R17, R20, R33, R34, R35,
+> R36, R38 e R41; R15, R16, R19 e R40 resolvidos em parte. Resumo, arquivos e testes em
+> **§5.7**. Os trechos das seções 3 e 5 que descrevem o comportamento antigo foram mantidos
+> para histórico e marcados com o novo estado.
+>
 > **Atualização de 2026-10-22 (remoção de redundâncias):** resolvidos R13 (N+1 em
 > `GET /pessoas`), R18/R29 (testes isolados do `.env` pelo perfil `test`) e parte de R25
 > (`definirFotoPerfil`/`findById`, parâmetro `request` de `getUserIdOrThrow`,
@@ -177,8 +182,10 @@ e, para tudo que é social (likes, matches, imagens), **traduzem para `Pessoa.id
   `password=null` e `provider="google"`; se não houver `Pessoa`, cria uma "básica"
   (só nome/e-mail/usuarioId/ativo — sem `genero`, `interesse`, `dataNasc`, sem checar
   idade nem termos) direto pelo repositório; gera JWT e redireciona para
-  `${FRONTEND_URL}/auth/callback?token=<jwt>` (token na query string). Ver R9, R12, R31
-  (depois disso `POST /pessoas` dá 409) e R32 (vínculo por e-mail não verificado).
+  `${FRONTEND_URL}/auth/callback#token=<jwt>` (desde 2026-11-16 no **fragmento**, que não
+  vai a logs nem ao `Referer`; antes era `?token=`). Exige `email_verified`, não entra em conta
+  com senha (R32 resolvido), invalida a sessão do `state` e, em falha, redireciona para
+  `/?erro=google_falhou`. Ver R12 e R31 (depois disso `POST /pessoas` dá 409).
 
 ### 3.3 Perfil (Pessoa)
 - `POST /pessoas` (`pessoa/PessoaController.java:79-128`): exige
@@ -236,8 +243,10 @@ e, para tudo que é social (likes, matches, imagens), **traduzem para `Pessoa.id
   `tinder_ufs/{pessoaId}/{uuid}.{ext}` (`:60`); se `perfil=true` desmarca a foto de perfil
   anterior, e sem principal ativa a nova assume o lugar; persiste `Imagem` com `id` UUID e `url` = `CF_R2_PUBLIC_URL/key` se configurado,
   senão `/api/imagens/proxy/key` (`:181-186`). A resposta do controller sobrescreve `url`
-  com o caminho de proxy (`ImagemController.java:53`). Sem limite de quantidade e confiando
-  no MIME/extensão do cliente (R35).
+  com o caminho de proxy (`ImagemController.java:53`). **Desde 2026-11-16 (R35 resolvido):**
+  o tipo vem dos bytes (JPEG/PNG/WebP), JPEG e PNG são re-codificados sem fallback para os
+  bytes originais, a resolução é limitada a 8000 px por lado, extensão e Content-Type são
+  decididos pelo servidor e cada perfil tem no máximo 6 fotos ativas.
 - `GET /api/imagens/minhas-imagens` (`:110-145`) — imagens ativas da própria pessoa.
 - `DELETE /api/imagens/{imagemId}` (`:71-108`) → `ImagemService.deletarImagem`
   (`:100-130`): 404 se não existe, 403 se não é dono, 400 se for a última imagem ativa;
@@ -250,9 +259,13 @@ e, para tudo que é social (likes, matches, imagens), **traduzem para `Pessoa.id
   dono e não tem match ativo com o dono (`MatchService.existeMatchAtivo`,
   `match/MatchService.java:37-40`); registra auditoria em log e responde **302** para
   URL pré-assinada válida por 1h (`ImagemService.java:132-139`), com `Cache-Control` de 1h
-  (R40). Qualquer outra exceção → 500.
+  (R40). Qualquer outra exceção → 500. **Desde 2026-11-16:** URL válida por 15 min e
+  `Cache-Control: private, max-age=600`.
 
 ### 3.6 Tags
+- **Desde 2026-11-16:** `POST /tags` exige `ROLE_ADMIN`, recebe `TagRequestDTO` (sem `id`,
+  `ativa` padrão `true`) e negações respondem 403 JSON, não 302 (R33 resolvido, R15 em parte).
+  Texto anterior:
 - `GET /tags`, `GET /tags/ativas` (públicos), `POST /tags` (qualquer autenticado; aceita
   `id` no corpo e sobrescreve tags existentes, e sem `ativa` no corpo a tag nasce
   **inativa** — R33), `DELETE /tags/{id}` (exige `ROLE_ADMIN`, que ninguém tem → em runtime
@@ -266,7 +279,10 @@ e, para tudo que é social (likes, matches, imagens), **traduzem para `Pessoa.id
 originais, `:35-38`), `MethodArgumentNotValidException` (400 com lista de campos, `:41-55`),
 `MaxUploadSizeExceededException` (413, `:58-62`) e **qualquer** `Exception` (500 genérico,
 `:65-71`). Porém a maior parte dos controllers faz `try/catch` próprio e monta respostas
-com formatos diferentes (ver R16).
+com formatos diferentes (ver R16). **Desde 2026-11-16** também trata JSON malformado,
+parâmetro ausente ou de tipo errado, validação de método e multipart (400), método não
+suportado (405), Content-Type não suportado (415) e rota inexistente (404); o 500 genérico só
+loga o nome da exceção.
 
 ## 4. Configuração e infraestrutura
 
@@ -425,7 +441,7 @@ Confirmado em execução: `/swagger-ui.html` → `302 Location: /oauth2/authoriz
 `application.yml:77` e antes citado no README não funciona; o acesso real é
 `/swagger-ui/index.html`.
 
-**R9. `FRONTEND_URL` do compose quebra o redirect do OAuth.** Default do compose:
+**R9. ~~`FRONTEND_URL` do compose quebra o redirect do OAuth.~~ Resolvido em 2026-11-16:** o compose usa uma única URL por padrão. Texto original: Default do compose:
 `http://localhost:3000,http://localhost:5173` (`docker-compose.yml:59`). O
 `OAuth2SuccessHandler` usa o valor como URL única (`OAuth2SuccessHandler.java:32,67-68`) →
 redireciona para `http://localhost:3000,http://localhost:5173/auth/callback?token=...`.
@@ -453,12 +469,12 @@ recebe as imagens já buscadas em lote e não faz mais uma query por pessoa. Con
 que cada `Imagem` resolve seu `@DBRef`
 individualmente, e o `groupingBy(img -> img.getPessoa().getId())` (`:66`) depende disso.
 
-**R14. Cadastro sem senha → 409 com mensagem interna.** `User.password` não tem validação
+**R14. ~~Cadastro sem senha → 409 com mensagem interna.~~ Resolvido:** `UserCreateDTO` e `LoginRequestDTO` validam os campos (400). Texto original: `User.password` não tem validação
 (`user/User.java:25`); `passwordEncoder.encode(null)` lança `IllegalArgumentException`
 ("rawPassword cannot be null"), que `UserController.java:101-104` converte em 409. `LoginRequestDTO`
 também não tem validações (`user/LoginRequestDTO.java:5-9`), apesar do `@Valid`.
 
-**R15. `ROLE_ADMIN` inexistente, e o "403" vira 302.** `CustomUserDetailsService.java:37`
+**R15. `ROLE_ADMIN` inexistente, e o "403" vira 302.** *Parcial em 2026-11-16:* o `SecurityConfig` tem entry point (401) e access-denied handler (403) que escrevem JSON direto e libera `/error`, então o 302 para o Google acabou; `ROLE_ADMIN` continua sem dono. Texto original: `CustomUserDetailsService.java:37`
 atribui `Collections.emptyList()`; `SecurityConfig.java:53` exige `hasRole("ADMIN")`, então
 `TagController.delete` (`:84-102`) é código morto. Em runtime, porém, o cliente **não recebe
 403**: o `AccessDeniedHandler` padrão faz `response.sendError(403)`, o container faz um
@@ -476,7 +492,7 @@ trocado por um redirect para o Google. Os 4xx devolvidos via `ResponseEntity` pe
 controllers não são afetados. Ao mesmo tempo qualquer usuário autenticado cria tags
 (`SecurityConfig.java:52`) — modelo de autorização incoerente (ver também R33).
 
-**R16. Tratamento de erro fragmentado e handler genérico agressivo.**
+**R16. Tratamento de erro fragmentado e handler genérico agressivo.** *Parcial em 2026-11-16:* os 4xx do Spring têm handler próprio, `include-message: never`, e `ImagemController` não devolve mais `e.getMessage()`; os quatro formatos de erro continuam. Texto original:
 Quatro formatos de erro coexistem: `{"erro": ...}` (`UserController`, `TagController`,
 `JwtFilter.java:143`, `GlobalExceptionHandler`), `{"error": ...}` (`PessoaController.java:97,103,126,185,211`),
 texto puro (`MatchController.java:95,102,142,147`) e `ImagemUploadResponseDTO{sucesso,mensagem}`
@@ -489,7 +505,7 @@ devolvendo **500**. (Comportamento padrão do Spring MVC; não executado aqui.) 
 cliente, contrariando a política declarada em `GlobalExceptionHandler.java:19-28`; e
 `server.error.include-message: always` (`application.yml:37`) idem.
 
-**R17. CORS hardcoded.** 6 origens fixas, incluindo domínios Vercel/Railway de produção e de
+**R17. ~~CORS hardcoded.~~ Resolvido em 2026-11-16:** origens em `CORS_ALLOWED_ORIGINS` (`seguranca.cors.allowed-origins`), sem `*` e sem credenciais. Texto original: 6 origens fixas, incluindo domínios Vercel/Railway de produção e de
 preview (`SecurityConfig.java:90-97`). Trocar de domínio exige recompilar.
 
 **R18. ~~Testes dependem de infraestrutura externa, e o default efetivo é produção.~~**
@@ -505,7 +521,7 @@ produção (detalhe em R29). O S3 é fixo em `localhost:9000`, bucket `test-buck
 `GOOGLE_*`, `BASE_URL` e `JWT_SECRET` também são exigidas (placeholders sem default). Sem
 Testcontainers e sem limpeza: os dados acumulam no banco usado.
 
-**R19. Validação de entrada divergente entre entidade e DTO.** `Pessoa` tem `@NotBlank`/
+**R19. Validação de entrada divergente entre entidade e DTO.** *Parcial em 2026-11-16:* `PessoaRequestDTO` valida tamanhos, `@Past` e o formato das redes sociais, e `LikeController` valida `destinoId` à mão. Texto original: `Pessoa` tem `@NotBlank`/
 `@NotNull`/`@Email`/`@Past` (`pessoa/Pessoa.java:26-44`), mas `PessoaPerfilDTO` não tem
 nenhuma anotação (`pessoa/PessoaPerfilDTO.java:10-29`) — `@Valid` em `PessoaController.java:88,157`
 não valida nada. `ImagemUploadDTO` também não tem `@NotNull` em `file`. `@NotBlank` em
@@ -513,7 +529,7 @@ não valida nada. `ImagemUploadDTO` também não tem `@NotNull` em `file`. `@Not
 a validação embutida de método pode disparar `HandlerMethodValidationException`, que cairia no
 500 genérico — não confirmado em execução.
 
-**R20. `TagController.create` mascara qualquer erro como 401** (`TagController.java:63-77`).
+**R20. ~~`TagController.create` mascara qualquer erro como 401~~ Resolvido em 2026-11-16** (sem `try/catch`; erros saem pelo handler global). Texto original: (`TagController.java:63-77`).
 
 ### 5.4 Baixos
 
@@ -598,7 +614,7 @@ essa mesma conta (perfil, fotos, matches), à qual o atacante continua tendo ace
 senha. O handler também não confere o atributo `email_verified` do Google. Confirmado por
 leitura de código; não executado (exige login Google real).
 
-**R33. [Médio] `POST /tags` aceita `id` e sobrescreve tags; `ativa` some se omitida.**
+**R33. ~~[Médio] `POST /tags` aceita `id` e sobrescreve tags; `ativa` some se omitida.~~ Resolvido em 2026-11-16:** `TagRequestDTO` sem `id`, `ativa` padrão `true`, e a rota exige ADMIN. Texto original:
 `TagController.create` recebe a entidade `Tag` (`TagController.java:59-60`) e
 `TagService.create` faz `save` (`TagService.java:18-20`): com `id` existente, o documento é
 substituído — qualquer usuário autenticado altera qualquer tag. Além disso, o Jackson
@@ -607,7 +623,7 @@ vazio), então um corpo sem `ativa` cria a tag com `ativa=false` (o default `tru
 `Tag.java:18` é ignorado) e ela não aparece em `GET /tags/ativas`. Ambos confirmados em
 execução.
 
-**R34. [Médio] `catch (Exception) → 401` transforma erros de negócio em "não autenticado".**
+**R34. ~~[Médio] `catch (Exception) → 401` transforma erros de negócio em "não autenticado".~~ Resolvido:** os `catch` de `UserController` e `TagController` foram removidos e o `JwtFilter` não envolve mais o `doFilter` no `try`. Texto original:
 `UserController.java:49-54` (`GET /users/me`), `:126-129` (`PUT /users/me`), `:147-149`
 (`DELETE /users/me`) e `TagController.java:73-77` (`POST /tags`) respondem 401 para
 **qualquer** exceção. Em `PUT /users/me`, o `UserService.updateUser` converte
@@ -617,7 +633,7 @@ autenticado"**. Hoje, sem índice único (R4), nem isso acontece: trocar o e-mai
 outra conta responde **200** e duplica o e-mail (confirmado em execução). Quando R4 for
 corrigido, o sintoma vira 401 — o frontend provavelmente vai deslogar o usuário.
 
-**R35. [Alto] Upload sem limite de quantidade, confiando no cliente.** `ImagemService.salvarImagem`
+**R35. ~~[Alto] Upload sem limite de quantidade, confiando no cliente.~~ Resolvido em 2026-11-16** (ver §3.5 e §5.7). Texto original: `ImagemService.salvarImagem`
 (`ImagemService.java:41-98`) não limita quantas imagens uma pessoa pode ter;
 `validarArquivo` (`:188-199`) só olha o `Content-Type` **declarado** pelo cliente; a extensão
 da chave vem do nome do arquivo enviado (`:59-60`, `:201-204`) e o `contentType` gravado no
@@ -628,7 +644,7 @@ falha na compressão e vai para o bucket com esse content-type — com `CF_R2_PU
 não executado). `docs/TESTES.md` (item E) confirmou o aceite de um arquivo texto com
 `Content-Type: image/png`.
 
-**R36. [Médio] Sem rate limit nem bloqueio no login.** `POST /users/login`
+**R36. ~~[Médio] Sem rate limit nem bloqueio no login.~~ Resolvido em 2026-11-16:** `RateLimitFilter` (por IP) e `LoginAttemptService` (por e-mail). Em memória: com várias réplicas cada uma conta separado. Texto original: `POST /users/login`
 (`UserController.java:60-84`) não tem limitação de tentativas; não há nenhuma dependência ou
 filtro de rate limiting no projeto (`grep` por `rate`/`bucket4j` em `src/main` não encontra
 nada; as antigas chaves `app.security.rate-limit.*` nunca foram implementadas). Força bruta
@@ -642,7 +658,7 @@ par, e a partir daí `findByPessoaId1AndPessoaId2` (`MatchRepository.java:20`, `
 lança `IncorrectResultSizeDataAccessException` → 500. Mesmo com `auto-index-creation` ligado,
 não haveria índice para criar.
 
-**R38. [Médio] `destinoId` do like não é validado.** `LikeController.darLike`
+**R38. ~~[Médio] `destinoId` do like não é validado.~~ Resolvido em 2026-11-16:** perfil inexistente → 400 (não checa se está ativo). Texto original: `LikeController.darLike`
 (`LikeController.java:66-82`) e `LikeService.darLike` (`LikeService.java:89-111`) não checam
 se existe uma `Pessoa` com esse id (nem se está ativa). Likes para `User.id`, ids
 inexistentes ou perfis apagados respondem 200 e gravam `Like` órfãos (confirmado em
@@ -656,14 +672,14 @@ fica sempre no default `false`, também em `GET /pessoas/{id}/perfil`. E
 exclui o próprio solicitante, nem perfis já curtidos/com match. Confirmado em
 `docs/TESTES.md` (item F).
 
-**R40. [Médio] Acesso a fotos sobrevive até 1h ao fim do match.** O proxy responde 302 com
+**R40. [Médio] Acesso a fotos sobrevive até 1h ao fim do match.** *Reduzido em 2026-11-16* para 15 min (URL) e 10 min (cache). Texto original: O proxy responde 302 com
 `Cache-Control: private, max-age=3600` (`ImagemProxyController.java:96-99`) para uma URL
 pré-assinada válida por 1h (`ImagemService.java:132-139`). Depois de `PUT
 /matches/desfazer/{id}`, o navegador do ex-match reutiliza o redirect em cache e a URL
 pré-assinada continua válida — o acesso só termina quando ambos expiram. Qualquer URL
 pré-assinada vazada também funciona sem autenticação nesse período.
 
-**R41. [Médio] Tamanho do `JWT_SECRET` só é validado no primeiro uso.** `JwtService.getKey`
+**R41. ~~[Médio] Tamanho do `JWT_SECRET` só é validado no primeiro uso.~~ Resolvido em 2026-11-16:** `@PostConstruct` impede a subida com menos de 32 bytes. Texto original: `JwtService.getKey`
 (`JwtService.java:24-34`) checa `< 32` caracteres a cada chamada, mas não há
 `@PostConstruct`: com um segredo curto a aplicação sobe normalmente e falha só no primeiro
 login (`IllegalStateException` → 500 pelo handler genérico, já que
@@ -714,6 +730,39 @@ revisão):
 | "ARQUITETURA.md, item 12" | `src/test/.../imagem/ImagemControllerTest.java:31` | **R18** e **R29** |
 | "item \"Endpoint stub que sempre retorna 403\"" | `src/test/.../pessoa/PessoaControllerTest.java:209-210` | **R21** |
 
+### 5.7 Endurecimento de segurança de 2026-11-16
+
+Rodada focada em segurança do back. Suíte depois da mudança: **80 testes, 0 falhas** (Mongo e
+MinIO descartáveis), incluindo `shared/security/SegurancaTest` (13 testes) e casos novos em
+`ImagemControllerTest` e `TagControllerTest`.
+
+| Problema | Risco | Correção | Onde |
+|---|---|---|---|
+| Upload confiava no Content-Type e na extensão do cliente e, se a compressão falhava, mandava os bytes originais (R35) | XSS armazenado no domínio público do bucket (SVG/HTML), EXIF com GPS exposto, *decompression bomb* | Tipo pelos bytes (JPEG/PNG/WebP); re-codificação sem fallback; até 8000 px por lado e 40 MP; 2 decodificações simultâneas; máximo 6 fotos; Content-Type e extensão definidos pelo servidor | `ImageCompressionUtil`, `ImagemService` |
+| `POST /tags` recebia a entidade (R33) | Qualquer usuário sobrescrevia ou desativava qualquer tag | `TagRequestDTO` sem `id`; rota só ADMIN | `TagController`, `TagRequestDTO`, `SecurityConfig` |
+| Login sem limite (R36) | Força bruta | 10/min por IP em login e cadastro, 300/min no resto; bloqueio de 15 min após 5 falhas por e-mail | `RateLimitFilter`, `LoginAttemptService`, `UserController` |
+| Tempo de resposta do login | Enumeração de e-mails cadastrados | Sempre um BCrypt (hash falso quando o e-mail não existe) | `UserService.login` |
+| Token na query do callback Google | Vazamento em logs, histórico e `Referer` | `#token=` no fragmento; o front limpa a URL antes de tudo | `OAuth2SuccessHandler`, `tinder/.../auth/callback` |
+| E-mail do perfil vinha do corpo | "Reservar" o e-mail de outra pessoa e impedir o cadastro dela | Perfil usa o e-mail da conta | `PessoaController.create` |
+| `doFilter` dentro do `try` do `JwtFilter` (R34) | Erros reais mascarados como 401 | Só a autenticação no `try` | `JwtFilter` |
+| Segredo JWT checado só no uso (R41) | App sobe insegura | `@PostConstruct`; emissor `pairup-api`, `jti`, tolerância de 30 s | `JwtService` |
+| CORS fixo, com credenciais (R17) | Origens de preview esquecidas com acesso | `CORS_ALLOWED_ORIGINS`, sem `*`, sem credenciais | `SecurityConfig` |
+| Mensagens internas ao cliente (R16) | Vazamento de detalhes de banco e exceções | `include-message: never`, handlers 400/404/405/415, mensagens genéricas | `GlobalExceptionHandler`, `application.yml`, `ImagemController`, `PessoaController` |
+| 302 para o Google em 401/403 (R15) | Respostas confusas e status errado | Entry point e access-denied JSON; `/error` liberado | `SecurityConfig` |
+| Sem cabeçalhos de segurança | Clickjacking, *sniffing*, vazamento de Referer | `X-Frame-Options: DENY`, `nosniff`, HSTS, `Referrer-Policy: no-referrer`, `Permissions-Policy` | `SecurityConfig` |
+| Validação fraca de entrada (R14, R19, R38) | Dados lixo, links maliciosos, likes órfãos | Senha 8–72, limites de tamanho, `@Past`, data ≤ 100 anos, formato das redes sociais, `destinoId` existente | DTOs, `PessoaService`, `LikeController` |
+| Log com valores do cliente | Log forging | `SecurityUtils.paraLog` | `UserController`, `ImagemProxyController` |
+| Swagger e detalhes do health sempre ligados | Mapa da API exposto | `SWAGGER_ENABLED` (padrão `false`), `show-details: never` | `application.yml` |
+| Limites de requisição altos | Abuso de memória | `max-request-size` 6 MB, `max-http-form-post-size` 1 MB | `application.yml` |
+| Mongo do compose exposto e com senha padrão | Banco acessível pela rede com `admin/admin123` | Porta só em `127.0.0.1`; `MONGO_ROOT_PASSWORD` obrigatória | `docker-compose.yml` |
+| URL de foto válida por 1 h (R40) | Ex-match vê fotos depois de desfeito | 15 min de URL, 10 min de cache | `ImagemService`, `ImagemProxyController` |
+
+**Continua em aberto:** R3/R4 (sem transações nem índices únicos), R6 (fotos por URL pública),
+R11 (sem refresh token), R12/R31 (perfil mínimo do Google), R15 (ninguém tem `ROLE_ADMIN`),
+R37, R39, R43 (credencial no histórico do git). A atualização do Spring Boot 3.2.3 → 3.2.12
+(corrige CVEs de Spring Security/Framework/Tomcat) foi testada e **revertida**: com ela,
+`findByPessoaInAndAtivaTrue` (consulta por `@DBRef` do feed) deixa de achar as fotos. Fazer a
+atualização junto com a reescrita dessa consulta.
 
 ## 6. Avaliação de documentação e modularidade
 
