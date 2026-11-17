@@ -48,39 +48,26 @@ public class TagController {
     }
 
     /**
-     * Cria uma nova tag.
-     * ✅ CORRIGIDO: Agora exige autenticação e retorna 401 se não autenticado
+     * Cria uma nova tag. Só ADMIN (SecurityConfig); hoje as tags são cadastradas no banco.
      */
     @PostMapping
-    @Operation(summary = "Criar nova tag")
+    @Operation(summary = "Criar nova tag", description = "Requer role ADMIN.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Tag criada"),
             @ApiResponse(responseCode = "400", description = "Dados inválidos"),
-            @ApiResponse(responseCode = "401", description = "Não autenticado")
+            @ApiResponse(responseCode = "401", description = "Não autenticado"),
+            @ApiResponse(responseCode = "403", description = "Requer role ADMIN")
     })
-    public ResponseEntity<?> create(
-            @RequestBody @Valid Tag tag) {
-
-        try {
-            // ✅ CORRIGIDO: Valida autenticação e retorna 401 se falhar
-            String userId = SecurityUtils.getUserIdOrThrow();
-
-            // Opcional: Log de quem criou a tag
-            log.info("Tag criada por userId={}: {}", userId, tag.getNome());
-
-            Tag created = tagService.create(tag);
-            return ResponseEntity.ok(created);
-
-        } catch (Exception e) {
-            // ✅ CORRIGIDO: Retorna 401 explícito em vez de 200
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("erro", "Autenticação necessária para criar tags"));
-        }
+    public ResponseEntity<Tag> create(@RequestBody @Valid TagRequestDTO dados) {
+        String userId = SecurityUtils.getUserIdOrThrow();
+        Tag created = tagService.create(new Tag(dados.getNome().trim(), dados.getDescricao(),
+                dados.getCategoria().trim(), dados.isAtiva()));
+        log.info("[AUDIT] Tag {} criada por userId={}", created.getId(), userId);
+        return ResponseEntity.ok(created);
     }
 
     /**
-     * Exclusão de tag.
-     * ✅ Retorna 403 explícito (bloqueado para não-ADMIN)
+     * Exclusão de tag: bloqueada (SecurityConfig exige ADMIN e o endpoint não apaga nada).
      */
     @DeleteMapping("/{id}")
     @Operation(summary = "Deletar tag", description = "Reservado para ADMIN. Temporariamente bloqueado.")
@@ -88,16 +75,6 @@ public class TagController {
             @ApiResponse(responseCode = "403", description = "Acesso negado — requer role ADMIN")
     })
     public ResponseEntity<?> delete(@PathVariable String id) {
-        // ✅ CORRIGIDO: Verifica autenticação antes de negar
-        try {
-            String userId = SecurityUtils.getUserIdOrThrow();
-            log.warn("Tentativa de deletar tag {} por userId={} - BLOQUEADO (requer ADMIN)", id, userId);
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("erro", "Autenticação necessária"));
-        }
-
-        // ✅ Retorna 403 Forbidden (não 401)
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(Map.of("erro", "Acesso negado. Esta operação requer permissão de ADMIN."));
     }

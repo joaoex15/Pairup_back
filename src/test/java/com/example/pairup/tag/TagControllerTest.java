@@ -51,7 +51,7 @@ class TagControllerTest {
 
     private String criarUser() throws Exception {
         String email = "tag_" + UUID.randomUUID().toString().substring(0, 8) + "@email.com";
-        User user = new User("Usuário Tag", email, "123456");
+        User user = new User("Usuário Tag", email, "12345678");
         MvcResult r = mockMvc.perform(post("/users")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(user)))
@@ -64,27 +64,12 @@ class TagControllerTest {
                 "Descrição de " + nome, categoria, ativa);
     }
 
+    @Autowired
+    private TagRepository tagRepository;
+
     @Test
-    void testCriarEListarTags() throws Exception {
-        String userId = criarUser();
-
-        mockMvc.perform(post("/tags")
-                        .with(comUsuario(userId))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(novaTag("Esporte", "Lazer", true))))
-                .andExpect(status().isOk());
-
-        mockMvc.perform(post("/tags")
-                        .with(comUsuario(userId))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(novaTag("Música", "Cultura", true))))
-                .andExpect(status().isOk());
-
-        mockMvc.perform(post("/tags")
-                        .with(comUsuario(userId))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(novaTag("Viagem", "Lazer", false))))
-                .andExpect(status().isOk());
+    void testListarTagsEhPublico() throws Exception {
+        tagRepository.save(novaTag("Esporte", "Lazer", true));
 
         // GET /tags e /tags/ativas são públicos — não exigem autenticação.
         mockMvc.perform(get("/tags"))
@@ -94,38 +79,51 @@ class TagControllerTest {
                 .andExpect(status().isOk());
     }
 
+    /** POST /tags exige ADMIN: usuário comum não cria tags. */
     @Test
-    void testDeleteTagDeveSerBloqueado() throws Exception {
-        String userId = criarUser();
-
-        MvcResult result = mockMvc.perform(post("/tags")
-                        .with(comUsuario(userId))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(novaTag("Esporte", "Lazer", true))))
-                .andExpect(status().isOk())
-                .andReturn();
-
-        Tag tagCriada = objectMapper.readValue(result.getResponse().getContentAsString(), Tag.class);
-
-        // ✅ DELETE /tags/{id} exige role ADMIN (SecurityConfig: hasRole("ADMIN")).
-        // Como nenhum usuário jamais recebe essa role (CustomUserDetailsService
-        // sempre monta authorities vazias — ver docs/ARQUITETURA.md, item 4), o
-        // Spring Security barra a requisição antes mesmo de chegar no controller,
-        // respondendo 403 (não o 5xx que este teste esperava antes, nem o JSON
-        // customizado do TagController.delete, que é código morto/inatingível).
-        mockMvc.perform(delete("/tags/" + tagCriada.getId())
-                        .with(comUsuario(userId)))
-                .andExpect(status().isForbidden());
-    }
-
-    @Test
-    void testCriarTagComDadosInvalidos() throws Exception {
+    void testUsuarioComumNaoCriaTag() throws Exception {
         String userId = criarUser();
 
         mockMvc.perform(post("/tags")
                         .with(comUsuario(userId))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
-                .andExpect(status().isBadRequest());
+                        .content(objectMapper.writeValueAsString(novaTag("Música", "Cultura", true))))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/tags")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(novaTag("Música", "Cultura", true))))
+                .andExpect(status().isUnauthorized());
+    }
+
+    /** Antes, enviar o id de uma tag existente no POST sobrescrevia a tag de todo mundo. */
+    @Test
+    void testUsuarioComumNaoSobrescreveTagExistente() throws Exception {
+        String userId = criarUser();
+        Tag existente = tagRepository.save(novaTag("Viagem", "Lazer", true));
+
+        Tag ataque = new Tag("hackeada", "x", "x", false);
+        ataque.setId(existente.getId());
+
+        mockMvc.perform(post("/tags")
+                        .with(comUsuario(userId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(ataque)))
+                .andExpect(status().isForbidden());
+
+        Tag depois = tagRepository.findById(existente.getId()).orElseThrow();
+        org.junit.jupiter.api.Assertions.assertEquals(existente.getNome(), depois.getNome());
+        org.junit.jupiter.api.Assertions.assertTrue(depois.isAtiva());
+    }
+
+    @Test
+    void testDeleteTagDeveSerBloqueado() throws Exception {
+        String userId = criarUser();
+        Tag tag = tagRepository.save(novaTag("Esporte", "Lazer", true));
+
+        // DELETE /tags/{id} exige role ADMIN, que nenhum usuário recebe hoje.
+        mockMvc.perform(delete("/tags/" + tag.getId())
+                        .with(comUsuario(userId)))
+                .andExpect(status().isForbidden());
     }
 }
