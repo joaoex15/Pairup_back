@@ -67,7 +67,7 @@ class MatchControllerTest {
 
     /**
      * ✅ MatchController traduz User.id -> Pessoa.id via pessoaService.findByUsuarioId
-     * antes de operar (ver docs/ARQUITETURA.md, item crítico 1) — um perfil precisa
+     * antes de operar (ver docs/ARQUITETURA.md, §4 "Conta × perfil") — um perfil precisa
      * existir para o usuário poder ter likes/matches. Retorna o Pessoa.id criado.
      */
     private String criarPessoaParaUsuario(String userId, String nome) throws Exception {

@@ -35,7 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 @AutoConfigureMockMvc
 // ✅ Isola o contexto/estado de segurança entre métodos de teste. Isso, por si só,
-// não limpa o MongoDB (ver docs/ARQUITETURA.md, item 12) — por isso os e-mails
+// não limpa o MongoDB (ver docs/DESENVOLVIMENTO.md, §4) — por isso os e-mails
 // abaixo também são únicos por execução (UUID), para não colidir com o índice
 // único de User.email/Pessoa.email em execuções anteriores.
 @DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_EACH_TEST_METHOD)

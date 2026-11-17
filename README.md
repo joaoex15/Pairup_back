@@ -1,98 +1,30 @@
-# PairUp
+# PairUp — API
 
-API REST (Spring Boot 3.2.3 / Java 21) de um app de paquera estilo Tinder para a
-comunidade universitária. Só o backend — não há frontend neste repositório.
+API REST (Spring Boot 3.2.3 / Java 21 / MongoDB) do PairUp, app de paquera para a comunidade
+universitária. O front fica no repositório `tinder`.
 
 ## Funcionalidades
 
-- Cadastro/login com e-mail e senha ou com Google (OAuth2), autenticação via JWT
-- Perfil (`Pessoa`) com filtros por gênero e interesse, e até 5 tags
-- Likes, com match automático quando recíproco
-- Upload de fotos (Cloudflare R2), visíveis no feed antes do match; exige `CF_R2_PUBLIC_URL`
-- Redes sociais liberadas apenas entre pessoas com match
-- Segurança: rate limit por IP, bloqueio de login por e-mail, upload validado pelo conteúdo,
-  cabeçalhos de segurança e CORS configurável (detalhes em `docs/BACKEND.md`)
+- Cadastro e login com e-mail e senha ou com Google; autenticação por JWT
+- Perfil com gênero, interesse, curso, até 5 tags e redes sociais
+- Feed paginado, likes, "passar" e match automático quando a curtida é recíproca
+- Aviso de match por e-mail (opcional)
+- Até 6 fotos por perfil no Cloudflare R2, validadas pelo conteúdo
+- Contatos liberados só entre pessoas com match
+- Rate limit, bloqueio de login, cabeçalhos de segurança e CORS configurável
 
-## Stack
-
-Spring Boot (Web, Security, OAuth2, Data MongoDB) · MongoDB · JWT · Cloudflare R2 (S3) ·
-thumbnailator · springdoc-openapi
-
-## Estrutura
-
-Código organizado por funcionalidade em `src/main/java/com/example/pairup/`:
-
-```
-user/     conta e login
-pessoa/   perfil
-match/    likes e matches
-imagem/   upload e acesso às fotos
-tag/      tags
-shared/   config, segurança e tratamento de erros
-```
-
-## Como rodar
-
-Pré-requisitos: JDK 21, Maven e Docker.
-
-1. Crie um `.env` na raiz:
-
-   ```
-   JWT_SECRET=            # mínimo 32 bytes: openssl rand -base64 48
-   GOOGLE_CLIENT_ID=
-   GOOGLE_CLIENT_SECRET=
-   BASE_URL=              # ex.: http://localhost:8080
-   FRONTEND_URL=          # uma única URL, ex.: http://localhost:5173
-   CF_R2_ENDPOINT=
-   CF_R2_ACCESS_KEY=
-   CF_R2_SECRET_KEY=
-   CF_R2_BUCKET=
-   MONGODB_URI=           # opcional, default mongodb://localhost:27017/PAIRUP
-   MAIL_HOST=             # opcional: SMTP do aviso de match; vazio desliga o envio
-   MAIL_PORT=             # opcional, default 587
-   MAIL_USERNAME=
-   MAIL_PASSWORD=
-   MAIL_FROM=             # remetente; obrigatório para enviar
-   CORS_ALLOWED_ORIGINS=  # opcional, origens do front separadas por vírgula
-   SWAGGER_ENABLED=true   # só em dev; o padrão é false
-   MONGO_ROOT_PASSWORD=   # obrigatória para o docker-compose
-   ```
-
-2. Suba a aplicação:
-
-   ```bash
-   docker-compose up        # MongoDB + aplicação
-   # ou, com um MongoDB já rodando:
-   mvn spring-boot:run
-   ```
-
-3. Com `SWAGGER_ENABLED=true`, acesse o Swagger em `http://localhost:8080/swagger-ui.html`.
-   Para testar rotas protegidas, cole o token de `POST /users/login` no botão **Authorize**.
-
-## Uso rápido da API
-
-- `POST /users` cria a conta (senha de 8 a 72 caracteres); `POST /users/login` devolve o token.
-- Envie `Authorization: Bearer <token>` nas rotas protegidas (o token expira em 15 min).
-- Crie o perfil com `POST /pessoas` antes de usar likes, matches e upload.
-
-Lista completa de endpoints em [`docs/REFERENCIA_FUNCOES.md`](docs/REFERENCIA_FUNCOES.md).
-
-## Testes
-
-Os testes usam o perfil `test` (Mongo na porta 27018 e MinIO), sem tocar no banco real:
+## Começo rápido
 
 ```bash
-SPRING_DATA_MONGODB_URI=mongodb://localhost:27018/PAIRUP_TEST mvn test
+cp .env.example .env               # preencha; ver docs/DESENVOLVIMENTO.md
+docker compose up -d mongodb
+mvn spring-boot:run                # http://localhost:8080
 ```
-
-Nunca rode `mvn test` sem esse ambiente: sem ele, o `.env` pode apontar para o banco real.
-
-Passo a passo para subir o ambiente de teste em [`docs/TESTES.md`](docs/TESTES.md).
 
 ## Documentação
 
-- [`docs/CONTRATO_FRONT_BACK.md`](docs/CONTRATO_FRONT_BACK.md) — como o front usa esta API
-- [`docs/ARQUITETURA.md`](docs/ARQUITETURA.md) — arquitetura, fluxos e riscos conhecidos
-- [`docs/REFERENCIA_FUNCOES.md`](docs/REFERENCIA_FUNCOES.md) — classes, métodos e endpoints
-- [`docs/TESTES.md`](docs/TESTES.md) — como rodar e resultados da suíte
-- [`docs/ANALISE_SIMPLIFICACAO.md`](docs/ANALISE_SIMPLIFICACAO.md) — plano de simplificação
+| Arquivo | Conteúdo |
+|---|---|
+| [`docs/ARQUITETURA.md`](docs/ARQUITETURA.md) | Como o sistema é montado, modelo de dados, segurança, decisões e riscos em aberto |
+| [`docs/API.md`](docs/API.md) | Cada rota: o que recebe, o que devolve e as regras; contrato com o front |
+| [`docs/DESENVOLVIMENTO.md`](docs/DESENVOLVIMENTO.md) | Variáveis, rodar local, testes, deploy e convenções de código |

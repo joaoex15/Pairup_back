@@ -293,8 +293,8 @@ class PessoaControllerTest {
         Pessoa criada = objectMapper.readValue(result.getResponse().getContentAsString(), Pessoa.class);
 
         // ✅ GET /pessoas/{id}/redes-sociais é um stub intencional que sempre nega
-        // acesso direto (ver docs/ARQUITETURA.md, item "Endpoint stub que sempre
-        // retorna 403") — o caminho correto é via /matches/{matchId}/redes-sociais.
+        // acesso direto (ver docs/ARQUITETURA.md, risco R21, e
+        // docs/API.md) — o caminho correto é via /matches/{matchId}/redes-sociais.
         // A rota exige autenticação (SecurityConfig: "/pessoas/**").
         mockMvc.perform(get("/pessoas/" + criada.getId() + "/redes-sociais")
                         .with(comUsuario(userId)))
