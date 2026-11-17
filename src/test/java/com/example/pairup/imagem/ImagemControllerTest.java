@@ -58,6 +58,19 @@ class ImagemControllerTest {
     @Autowired
     private PessoaRepository pessoaRepository;
 
+    /** JPEG de verdade: o upload agora decodifica a imagem e recusa bytes que não sejam imagem. */
+    private static byte[] jpegValido() {
+        try {
+            java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(20, 20,
+                    java.awt.image.BufferedImage.TYPE_INT_RGB);
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            javax.imageio.ImageIO.write(img, "jpg", out);
+            return out.toByteArray();
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     private String uid() {
         return UUID.randomUUID().toString().substring(0, 8);
     }
@@ -82,7 +95,7 @@ class ImagemControllerTest {
      */
     private String criarUserComPerfil() throws Exception {
         String email = "joao_imagem_" + uid() + "@email.com";
-        User user = new User("João", email, "123456");
+        User user = new User("João", email, "12345678");
         MvcResult userResult = mockMvc.perform(post("/users")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(user)))
@@ -108,7 +121,7 @@ class ImagemControllerTest {
     @Test
     void uploadImagemSemTokenDeveRetornar401() throws Exception {
         MockMultipartFile file = new MockMultipartFile(
-                "file", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, "fake-image-bytes".getBytes());
+                "file", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, jpegValido());
 
         mockMvc.perform(multipart("/api/imagens/upload")
                         .file(file)
@@ -120,7 +133,7 @@ class ImagemControllerTest {
     void uploadImagemSemPerfilCadastradoDeveRetornar404() throws Exception {
         // User existe mas não tem Pessoa associada
         String email = "semperfil_imagem_" + uid() + "@email.com";
-        User userSemPerfil = new User("Sem Perfil", email, "123456");
+        User userSemPerfil = new User("Sem Perfil", email, "12345678");
         MvcResult userResult = mockMvc.perform(post("/users")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(userSemPerfil)))
@@ -130,7 +143,7 @@ class ImagemControllerTest {
                 userResult.getResponse().getContentAsString(), User.class).getId();
 
         MockMultipartFile file = new MockMultipartFile(
-                "file", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, "fake-image-bytes".getBytes());
+                "file", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, jpegValido());
 
         // ✅ ImagemController.uploadImagem responde 400 (não 404) quando o perfil não
         // existe (ImagemController.java:40-43) — o teste esperava um contrato que o
@@ -157,12 +170,28 @@ class ImagemControllerTest {
                 .andExpect(status().isBadRequest());
     }
 
+    /** HTML/SVG disfarçado de imagem pelo Content-Type não pode chegar ao bucket (XSS). */
+    @Test
+    void uploadDeArquivoQueNaoEhImagemDeveRetornar400() throws Exception {
+        String userId = criarUserComPerfil();
+
+        MockMultipartFile html = new MockMultipartFile(
+                "file", "foto.html", "image/svg+xml",
+                "<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>".getBytes());
+
+        mockMvc.perform(multipart("/api/imagens/upload")
+                        .file(html)
+                        .param("perfil", "true")
+                        .with(comUsuario(userId)))
+                .andExpect(status().isBadRequest());
+    }
+
     @Test
     void uploadImagemComSucesso() throws Exception {
         String userId = criarUserComPerfil();
 
         MockMultipartFile file = new MockMultipartFile(
-                "file", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, "fake-image-bytes".getBytes());
+                "file", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, jpegValido());
 
         mockMvc.perform(multipart("/api/imagens/upload")
                         .file(file)
@@ -183,7 +212,7 @@ class ImagemControllerTest {
 
         // Faz upload para obter um imagemId real
         MockMultipartFile file = new MockMultipartFile(
-                "file", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, "fake-image-bytes".getBytes());
+                "file", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, jpegValido());
 
         MvcResult uploadResult = mockMvc.perform(multipart("/api/imagens/upload")
                         .file(file)
@@ -213,7 +242,7 @@ class ImagemControllerTest {
         // imagem do perfil"). Com apenas 1 imagem, a exclusão sempre responde 400 —
         // o teste precisa de uma segunda imagem para exercitar o caminho de sucesso.
         MockMultipartFile file1 = new MockMultipartFile(
-                "file", "foto1.jpg", MediaType.IMAGE_JPEG_VALUE, "fake-image-bytes-1".getBytes());
+                "file", "foto1.jpg", MediaType.IMAGE_JPEG_VALUE, jpegValido());
         mockMvc.perform(multipart("/api/imagens/upload")
                         .file(file1)
                         .param("perfil", "true")
@@ -221,7 +250,7 @@ class ImagemControllerTest {
                 .andExpect(status().isOk());
 
         MockMultipartFile file2 = new MockMultipartFile(
-                "file", "foto2.jpg", MediaType.IMAGE_JPEG_VALUE, "fake-image-bytes-2".getBytes());
+                "file", "foto2.jpg", MediaType.IMAGE_JPEG_VALUE, jpegValido());
         MvcResult uploadResult = mockMvc.perform(multipart("/api/imagens/upload")
                         .file(file2)
                         .param("perfil", "false")
@@ -243,7 +272,7 @@ class ImagemControllerTest {
 
     private String enviarFoto(String userId, boolean perfil) throws Exception {
         MockMultipartFile file = new MockMultipartFile(
-                "file", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, "fake-image-bytes".getBytes());
+                "file", "foto.jpg", MediaType.IMAGE_JPEG_VALUE, jpegValido());
         MvcResult result = mockMvc.perform(multipart("/api/imagens/upload")
                         .file(file)
                         .param("perfil", String.valueOf(perfil))

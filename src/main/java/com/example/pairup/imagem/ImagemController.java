@@ -68,13 +68,13 @@ public class ImagemController {
             log.warn("Erro de validação: {}", e.getMessage());
             return ResponseEntity.badRequest().body(ImagemUploadResponseDTO.error(e.getMessage()));
         } catch (SecurityException e) {
-            log.error("Erro de segurança: {}", e.getMessage());
+            log.warn("[SECURITY] {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(ImagemUploadResponseDTO.error(e.getMessage()));
+                    .body(ImagemUploadResponseDTO.error("Acesso negado"));
         } catch (Exception e) {
             log.error("Erro interno: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(ImagemUploadResponseDTO.error("Erro ao processar upload: " + e.getMessage()));
+                    .body(ImagemUploadResponseDTO.error("Erro ao processar upload. Tente novamente."));
         }
     }
 
@@ -110,9 +110,9 @@ public class ImagemController {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(ImagemUploadResponseDTO.error(e.getMessage()));
         } catch (SecurityException e) {
-            log.error("Erro de segurança: {}", e.getMessage());
+            log.warn("[SECURITY] {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(ImagemUploadResponseDTO.error(e.getMessage()));
+                    .body(ImagemUploadResponseDTO.error("Acesso negado"));
         } catch (IllegalStateException e) {
             log.warn("Erro de estado: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
@@ -120,7 +120,7 @@ public class ImagemController {
         } catch (Exception e) {
             log.error("Erro interno: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(ImagemUploadResponseDTO.error("Erro ao deletar imagem: " + e.getMessage()));
+                    .body(ImagemUploadResponseDTO.error("Erro ao deletar imagem. Tente novamente."));
         }
     }
 

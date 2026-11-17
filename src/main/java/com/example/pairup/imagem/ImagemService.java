@@ -32,6 +32,12 @@ public class ImagemService {
     private final S3Client s3Client;
     private final S3Presigner s3Presigner;
 
+    /** Mesmo limite do front (FotosUploader.maxFotos). */
+    public static final int MAX_FOTOS = 6;
+
+    /** Validade da URL pré-assinada entregue pelo proxy. */
+    public static final Duration VALIDADE_URL = Duration.ofMinutes(15);
+
     @Value("${cloudflare.r2.bucket}")
     private String bucket;
 
@@ -45,25 +51,24 @@ public class ImagemService {
         validarArquivo(file);
 
         Pessoa pessoa = pessoaRepository.findById(pessoaId)
-                .orElseThrow(() -> new IllegalArgumentException("Pessoa não encontrada com ID: " + pessoaId));
+                .orElseThrow(() -> new IllegalArgumentException("Perfil não encontrado"));
 
-        byte[] imagemComprimida;
-        try {
-            imagemComprimida = imageCompressionUtil.compressImage(file);
-            log.debug("Imagem comprimida: {} bytes → {} bytes", file.getSize(), imagemComprimida.length);
-        } catch (Exception e) {
-            log.warn("Falha na compressão, usando bytes originais: {}", e.getMessage());
-            imagemComprimida = file.getBytes();
+        if (imagemRepository.countByPessoaIdAndAtivaTrue(pessoaId) >= MAX_FOTOS) {
+            throw new IllegalArgumentException("Limite de " + MAX_FOTOS + " fotos atingido. Apague uma antes de enviar outra.");
         }
 
-        String extensao = getExtensao(file.getOriginalFilename());
-        String key = "tinder_ufs/" + pessoaId + "/" + UUID.randomUUID() + "." + extensao;
-        String contentType = file.getContentType() != null ? file.getContentType() : "image/jpeg";
+        // Tipo, extensão e Content-Type decididos pelo conteúdo, nunca pelo que o cliente diz
+        ImageCompressionUtil.ImagemProcessada processada = imageCompressionUtil.processar(file.getBytes());
+        byte[] imagemComprimida = processada.bytes();
+        String key = "tinder_ufs/" + pessoaId + "/" + UUID.randomUUID() + "." + processada.formato().extensao;
+        String contentType = processada.formato().mimeType;
 
         PutObjectRequest putRequest = PutObjectRequest.builder()
                 .bucket(bucket)
                 .key(key)
                 .contentType(contentType)
+                .contentDisposition("inline")
+                .cacheControl("private, max-age=86400")
                 .contentLength((long) imagemComprimida.length)
                 .build();
         s3Client.putObject(putRequest, RequestBody.fromBytes(imagemComprimida));
@@ -105,7 +110,7 @@ public class ImagemService {
         log.info("Deletando imagem: {} para pessoaId: {}", imagemId, pessoaId);
 
         Imagem imagem = imagemRepository.findById(imagemId)
-                .orElseThrow(() -> new IllegalArgumentException("Imagem não encontrada: " + imagemId));
+                .orElseThrow(() -> new IllegalArgumentException("Imagem não encontrada"));
 
         if (!imagem.idDoDono().equals(pessoaId)) {
             throw new SecurityException("Acesso negado: você não é o proprietário desta imagem");
@@ -167,7 +172,7 @@ public class ImagemService {
 
     public String gerarUrlPresignada(String publicId) {
         GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
-                .signatureDuration(Duration.ofHours(1))
+                .signatureDuration(VALIDADE_URL)
                 .getObjectRequest(req -> req.bucket(bucket).key(publicId))
                 .build();
         PresignedGetObjectRequest presigned = s3Presigner.presignGetObject(presignRequest);
@@ -177,7 +182,7 @@ public class ImagemService {
     @Transactional(readOnly = true)
     public Imagem findByPublicId(String publicId) {
         return imagemRepository.findByPublicId(publicId)
-                .orElseThrow(() -> new IllegalArgumentException("Imagem não encontrada: " + publicId));
+                .orElseThrow(() -> new IllegalArgumentException("Imagem não encontrada"));
     }
 
     @Transactional(readOnly = true)
@@ -196,17 +201,8 @@ public class ImagemService {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("Arquivo não pode ser vazio");
         }
-        String mimeType = file.getContentType();
-        if (mimeType == null || !mimeType.startsWith("image/")) {
-            throw new IllegalArgumentException("Tipo de arquivo não permitido. Envie apenas imagens.");
-        }
         if (file.getSize() > 5 * 1024 * 1024) {
             throw new IllegalArgumentException("Arquivo excede o limite de 5MB");
         }
-    }
-
-    private String getExtensao(String nomeOriginal) {
-        if (nomeOriginal == null || !nomeOriginal.contains(".")) return "jpg";
-        return nomeOriginal.substring(nomeOriginal.lastIndexOf('.') + 1).toLowerCase();
     }
 }

@@ -39,13 +39,10 @@ public class ImagemProxyController {
         String fullPath = request.getRequestURI();
         String publicId = fullPath.replace("/api/imagens/proxy/", "");
 
-        log.info("Proxy request - publicId extraído: {}", publicId);
-
         if (isPathTraversal(publicId)) {
-            log.warn("[SECURITY] Path traversal bloqueado: {}", publicId);
             auditLogService.logSecurityViolation(
                     SecurityUtils.getCurrentUserId() != null ? SecurityUtils.getCurrentUserId() : "unknown",
-                    "Path traversal attempt: " + publicId
+                    "Path traversal attempt: " + SecurityUtils.paraLog(publicId)
             );
             return ResponseEntity.badRequest().build();
         }
@@ -58,14 +55,13 @@ public class ImagemProxyController {
             String userId = SecurityUtils.getUserIdOrThrow();
 
             if (!isValidPublicId(publicId)) {
-                log.warn("[SECURITY] PublicId inválido: {} from user: {}", publicId, userId);
+                log.warn("[SECURITY] PublicId inválido de userId={}", userId);
                 return ResponseEntity.badRequest().build();
             }
 
             Imagem imagem;
             try {
                 imagem = imagemService.findByPublicId(publicId);
-                log.info("Imagem encontrada: ID={}, ativa={}", imagem.getId(), imagem.isAtiva());
             } catch (IllegalArgumentException e) {
                 log.warn("Imagem não encontrada: {}", publicId);
                 return ResponseEntity.notFound().build();
@@ -81,13 +77,13 @@ public class ImagemProxyController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
 
-            Pessoa donoImagem = imagem.getPessoa();
-            if (donoImagem == null) {
+            if (imagem.getPessoa() == null) {
                 return ResponseEntity.notFound().build();
             }
+            String donoId = imagem.idDoDono();
 
-            boolean isPropria = solicitante.getId().equals(donoImagem.getId());
-            boolean hasMatch  = matchService.existeMatchAtivo(solicitante.getId(), donoImagem.getId());
+            boolean isPropria = solicitante.getId().equals(donoId);
+            boolean hasMatch  = !isPropria && matchService.existeMatchAtivo(solicitante.getId(), donoId);
 
             if (!isPropria && !hasMatch) {
                 log.warn("[SECURITY] Acesso negado: {} -> {}", userId, publicId);
@@ -100,7 +96,8 @@ public class ImagemProxyController {
 
             return ResponseEntity.status(HttpStatus.FOUND)
                     .header(HttpHeaders.LOCATION, presignedUrl)
-                    .header(HttpHeaders.CACHE_CONTROL, "private, max-age=3600")
+                    // Menor que a validade da URL assinada (15 min): o navegador nunca reusa uma URL expirada
+                    .header(HttpHeaders.CACHE_CONTROL, "private, max-age=600")
                     .build();
 
         } catch (Exception e) {
