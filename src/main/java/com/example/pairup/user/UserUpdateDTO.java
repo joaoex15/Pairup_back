@@ -16,7 +16,9 @@ public class UserUpdateDTO {
     private String nome;
 
     @Email
+    @Size(max = 254)
     private String email;
 
+    @Size(max = 128)
     private String senhaAtual;
 }

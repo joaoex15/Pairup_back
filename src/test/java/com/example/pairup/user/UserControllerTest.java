@@ -37,7 +37,7 @@ class UserControllerTest {
     private User novoUser(String nome) {
         String email = nome.toLowerCase().replaceAll(" ", "_")
                 + "_" + UUID.randomUUID().toString().substring(0, 8) + "@email.com";
-        return new User(nome, email, "123456");
+        return new User(nome, email, "12345678");
     }
 
     @BeforeEach
@@ -58,7 +58,7 @@ class UserControllerTest {
         // Login para obter token real
         LoginRequestDTO loginRequest = new LoginRequestDTO();
         loginRequest.setEmail(testEmail);
-        loginRequest.setPassword("123456");
+        loginRequest.setPassword("12345678");
 
         MvcResult loginResult = mockMvc.perform(post("/users/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -98,7 +98,7 @@ class UserControllerTest {
 
         LoginRequestDTO login = new LoginRequestDTO();
         login.setEmail(testEmail);
-        login.setPassword("123456");
+        login.setPassword("12345678");
         mockMvc.perform(post("/users/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(login)))
@@ -148,7 +148,7 @@ class UserControllerTest {
                         .content(objectMapper.writeValueAsString(user1)))
                 .andExpect(status().isOk());
 
-        User userDuplicado = new User("João 2", user1.getEmail(), "123456");
+        User userDuplicado = new User("João 2", user1.getEmail(), "12345678");
         mockMvc.perform(post("/users")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(userDuplicado)))
@@ -175,7 +175,7 @@ class UserControllerTest {
 
         LoginRequestDTO loginTemp = new LoginRequestDTO();
         loginTemp.setEmail(tempUser.getEmail());
-        loginTemp.setPassword("123456");
+        loginTemp.setPassword("12345678");
 
         MvcResult loginResult = mockMvc.perform(post("/users/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -213,7 +213,7 @@ class UserControllerTest {
     @Test
     void trocarEmailComSenhaAtualFunciona() throws Exception {
         String novo = "novo_" + UUID.randomUUID().toString().substring(0, 8) + "@email.com";
-        trocarEmail(novo, "123456")
+        trocarEmail(novo, "12345678")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.email").value(novo));
     }
@@ -226,7 +226,7 @@ class UserControllerTest {
                         .content(objectMapper.writeValueAsString(outro)))
                 .andExpect(status().isOk());
 
-        trocarEmail(outro.getEmail(), "123456")
+        trocarEmail(outro.getEmail(), "12345678")
                 .andExpect(status().isConflict());
     }
 }

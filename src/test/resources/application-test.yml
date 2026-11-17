@@ -28,3 +28,16 @@ cloudflare:
     secret-key: test-secret-key
     bucket: test-bucket
     public-url: http://localhost:9000/test-bucket
+
+# Testes rodam muitas requisições seguidas do mesmo "IP" e usam o Swagger (OpenApiDocsTest)
+seguranca:
+  rate-limit:
+    habilitado: false
+  cors:
+    allowed-origins: http://localhost:5173
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true

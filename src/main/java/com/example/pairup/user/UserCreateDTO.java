@@ -12,14 +12,16 @@ import lombok.Data;
 @Data
 public class UserCreateDTO {
 
+    @Size(max = 100)
     private String nome;
 
     @Email
     @NotBlank
+    @Size(max = 254)
     private String email;
 
-    // Máximo de 72: o BCrypt ignora o que passa disso.
+    // Mínimo de 8 (recomendação NIST/OWASP); máximo de 72: o BCrypt ignora o que passa disso.
     @NotBlank
-    @Size(min = 6, max = 72)
+    @Size(min = 8, max = 72, message = "a senha deve ter entre 8 e 72 caracteres")
     private String password;
 }

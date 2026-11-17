@@ -1,6 +1,7 @@
 package com.example.pairup.user;
 
 import com.example.pairup.shared.security.JwtService;
+import com.example.pairup.shared.security.LoginAttemptService;
 import com.example.pairup.shared.security.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirements;
@@ -28,6 +29,7 @@ public class UserController {
 
     private final UserService userService;
     private final JwtService jwtService;
+    private final LoginAttemptService loginAttemptService;
 
     /**
      * Retorna os dados do usuário autenticado (sem senha).
@@ -40,18 +42,11 @@ public class UserController {
             @ApiResponse(responseCode = "401", description = "Não autenticado")
     })
     public ResponseEntity<?> getMe() {
-        try {
-            String userId = SecurityUtils.getUserIdOrThrow();
-            User user = userService.findById(userId);
-            if (user == null) return ResponseEntity.notFound().build();
-            user.setPassword(null);
-            return ResponseEntity.ok(user);
-        } catch (Exception e) {
-            // ✅ CORRIGIDO: Garantir 401 para não autenticado
-            log.warn("Tentativa de acesso não autorizado a /users/me");
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("erro", "Usuário não autenticado"));
-        }
+        String userId = SecurityUtils.getUserIdOrThrow();
+        User user = userService.findById(userId);
+        if (user == null) return ResponseEntity.notFound().build();
+        user.setPassword(null);
+        return ResponseEntity.ok(user);
     }
 
     /**
@@ -65,9 +60,19 @@ public class UserController {
             @ApiResponse(responseCode = "401", description = "Credenciais inválidas")
     })
     public ResponseEntity<?> login(@RequestBody @Valid LoginRequestDTO loginRequest) {
+        String email = loginRequest.getEmail();
+
+        // Bloqueio por conta: vale mesmo se o atacante trocar de IP a cada tentativa
+        if (loginAttemptService.estaBloqueado(email)) {
+            log.warn("[AUDIT] Login bloqueado temporariamente para email={}", SecurityUtils.paraLog(email));
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(Map.of("erro", "Muitas tentativas. Tente de novo em alguns minutos."));
+        }
+
         try {
-            User user = userService.login(loginRequest.getEmail(), loginRequest.getPassword());
-            String token = jwtService.generateToken(user.getId().toString());
+            User user = userService.login(email, loginRequest.getPassword());
+            loginAttemptService.registrarSucesso(email);
+            String token = jwtService.generateToken(user.getId());
 
             log.info("[AUDIT] Login bem-sucedido para userId={}", user.getId());
 
@@ -78,7 +83,8 @@ public class UserController {
             ));
 
         } catch (BadCredentialsException e) {
-            log.warn("[AUDIT] Tentativa de login falhou para email={}", loginRequest.getEmail());
+            loginAttemptService.registrarFalha(email);
+            log.warn("[AUDIT] Tentativa de login falhou para email={}", SecurityUtils.paraLog(email));
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("erro", "Credenciais inválidas."));
         }
@@ -139,13 +145,9 @@ public class UserController {
             @ApiResponse(responseCode = "401", description = "Não autenticado")
     })
     public ResponseEntity<Void> deleteMe() {
-        try {
-            String userId = SecurityUtils.getUserIdOrThrow();
-            log.info("[AUDIT] Conta deletada para userId={}", userId);
-            userService.deleteUser(userId);
-            return ResponseEntity.noContent().build();
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-        }
+        String userId = SecurityUtils.getUserIdOrThrow();
+        log.info("[AUDIT] Conta deletada para userId={}", userId);
+        userService.deleteUser(userId);
+        return ResponseEntity.noContent().build();
     }
 }

@@ -7,7 +7,7 @@ spring:
   servlet:
     multipart:
       max-file-size: 5MB
-      max-request-size: 30MB
+      max-request-size: 6MB
       enabled: true
       resolve-lazily: true
   # Sem MAIL_HOST os e-mails ficam desligados e a aplicação funciona normalmente.
@@ -47,19 +47,44 @@ spring:
 
 server:
   port: ${PORT:8080}
+  # Nunca devolver detalhes internos (mensagem de exceção, stack trace) ao cliente
   error:
-    include-message: always
-    include-binding-errors: always
+    include-message: never
+    include-binding-errors: never
+    include-stacktrace: never
+    include-exception: false
+    whitelabel:
+      enabled: false
+  servlet:
+    session:
+      cookie:
+        # Secure é posto pelo Tomcat sozinho quando a requisição chega via HTTPS (x-forwarded-proto)
+        http-only: true
+        same-site: lax
+      timeout: 10m
   forward-headers-strategy: native
   tomcat:
     connection-timeout: 20000
-    max-http-form-post-size: 30MB
+    max-http-form-post-size: 1MB
+    max-swallow-size: 6MB
     remoteip:
       remote-ip-header: x-forwarded-for
       protocol-header: x-forwarded-proto
 
 jwt:
   secret: ${JWT_SECRET}
+
+seguranca:
+  cors:
+    # Lista separada por vírgula. Em produção defina só as origens reais do front.
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,https://pairup-flax.vercel.app}
+  rate-limit:
+    habilitado: ${RATE_LIMIT_ENABLED:true}
+    auth-por-minuto: ${RATE_LIMIT_AUTH:10}
+    geral-por-minuto: ${RATE_LIMIT_GERAL:300}
+  login:
+    max-falhas: 5
+    bloqueio-minutos: 15
 
 cloudflare:
   r2:
@@ -87,13 +112,15 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
 
+# Documentação da API desligada por padrão (expõe o mapa de endpoints).
+# Para usar localmente: SWAGGER_ENABLED=true no .env
 springdoc:
   api-docs:
     path: /api-docs
-    enabled: true
+    enabled: ${SWAGGER_ENABLED:false}
   swagger-ui:
     path: /swagger-ui.html
-    enabled: true
+    enabled: ${SWAGGER_ENABLED:false}
 
 management:
   endpoints:
@@ -102,4 +129,4 @@ management:
         include: health,info
   endpoint:
     health:
-      show-details: always
+      show-details: never
