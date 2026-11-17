@@ -7,6 +7,7 @@ import com.example.pairup.user.UserRepository;
 import com.example.pairup.shared.security.JwtService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
@@ -15,6 +16,7 @@ import org.springframework.security.web.authentication.SimpleUrlAuthenticationSu
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.util.Locale;
 import java.util.Optional;
 
 @Component
@@ -39,16 +41,21 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
                                         HttpServletResponse response,
                                         Authentication authentication) throws IOException {
 
+        // A sessão só existia para o "state" do OAuth2; a API usa apenas o JWT.
+        HttpSession sessao = request.getSession(false);
+        if (sessao != null) sessao.invalidate();
+
         OAuth2User oauth2User = (OAuth2User) authentication.getPrincipal();
 
-        String email = oauth2User.getAttribute("email");
+        String emailBruto = oauth2User.getAttribute("email");
         String nome = oauth2User.getAttribute("name");
 
         // Só aceita e-mail que o Google confirmou: é ele que identifica a conta.
-        if (email == null || !Boolean.TRUE.equals(oauth2User.getAttribute("email_verified"))) {
+        if (emailBruto == null || !Boolean.TRUE.equals(oauth2User.getAttribute("email_verified"))) {
             redirecionarComErro(request, response, "email_nao_verificado");
             return;
         }
+        String email = emailBruto.trim().toLowerCase(Locale.ROOT);
 
         Optional<User> existente = userRepository.findByEmail(email);
 
@@ -78,9 +85,11 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
             pessoaRepository.save(novaPessoa);
         }
 
-        String token = jwtService.generateToken(user.getId().toString());
+        String token = jwtService.generateToken(user.getId());
 
-        String redirectUrl = baseUrl() + "/auth/callback?token=" + token;
+        // Token no fragmento (#), não na query (?): o fragmento não é enviado ao servidor do
+        // front, não aparece em logs de acesso/proxy nem no header Referer.
+        String redirectUrl = baseUrl() + "/auth/callback#token=" + token;
 
         getRedirectStrategy().sendRedirect(request, response, redirectUrl);
     }

@@ -76,7 +76,7 @@ class OAuth2SuccessHandlerTest {
         google.setProvider("google");
         when(userRepository.findByEmail("vitima@gmail.com")).thenReturn(Optional.of(google));
 
-        assertThat(login(true)).isEqualTo("http://front/auth/callback?token=tok");
+        assertThat(login(true)).isEqualTo("http://front/auth/callback#token=tok");
     }
 
     @Test
@@ -84,7 +84,7 @@ class OAuth2SuccessHandlerTest {
         when(userRepository.findByEmail("vitima@gmail.com")).thenReturn(Optional.empty());
         when(userRepository.save(any())).thenAnswer(inv -> { User u = inv.getArgument(0); u.setId("u3"); return u; });
 
-        assertThat(login(true)).isEqualTo("http://front/auth/callback?token=tok");
+        assertThat(login(true)).isEqualTo("http://front/auth/callback#token=tok");
         verify(userRepository).save(argThat(u -> "google".equals(u.getProvider())));
     }
 }
