@@ -76,7 +76,7 @@ class PessoaControllerTest {
     }
 
     private User novoUser(String nome) {
-        return new User(nome, nome.toLowerCase() + "_" + uid() + "@email.com", "123456");
+        return new User(nome, nome.toLowerCase() + "_" + uid() + "@email.com", "12345678");
     }
 
     private Pessoa novaPessoa(String nome, String email) {
@@ -201,11 +201,16 @@ class PessoaControllerTest {
                         .content(objectMapper.writeValueAsString(novaPessoa("João", email))))
                 .andExpect(status().isOk());
 
+        // O e-mail do corpo é ignorado: o perfil usa o e-mail da conta autenticada
+        String emailDaConta = objectMapper.readTree(mockMvc.perform(get("/users/me")
+                        .with(comUsuario(userId)))
+                .andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8)).get("email").asText();
+
         mockMvc.perform(get("/pessoas/me")
                         .with(comUsuario(userId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.nome").value("João"))
-                .andExpect(jsonPath("$.email").value(email))
+                .andExpect(jsonPath("$.email").value(emailDaConta))
                 .andExpect(jsonPath("$.dataNasc").value("2001-01-01"))
                 .andExpect(jsonPath("$.cienciaResponsabilidade").value(true))
                 .andExpect(jsonPath("$.perfilCompleto").value(true))

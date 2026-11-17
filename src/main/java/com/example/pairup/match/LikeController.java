@@ -53,6 +53,11 @@ public class LikeController {
         String userId = SecurityUtils.getUserIdOrThrow();
         String origemId = pessoaService.getPessoaIdComCadastroCompletoOrThrow(userId);
 
+        if (destinoId == null || destinoId.isBlank() || destinoId.length() > 64
+                || pessoaService.findById(destinoId) == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Perfil inválido");
+        }
+
         // ✅ Impede auto-like
         if (origemId.equals(destinoId)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,

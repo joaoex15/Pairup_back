@@ -1,6 +1,8 @@
 package com.example.pairup.pessoa;
 
 import com.example.pairup.shared.security.SecurityUtils;
+import com.example.pairup.user.User;
+import com.example.pairup.user.UserRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -27,6 +29,7 @@ public class PessoaController {
     private static final Logger log = LoggerFactory.getLogger(PessoaController.class);
 
     private final PessoaService pessoaService;
+    private final UserRepository userRepository;
 
     @GetMapping
     @Operation(summary = "Listar perfis com filtros")
@@ -104,7 +107,13 @@ public class PessoaController {
         pessoa.setNome(pessoaDTO.getNome());
         pessoa.setCurso(pessoaDTO.getCurso());
         pessoa.setDataNasc(pessoaDTO.getDataNasc());
-        pessoa.setEmail(pessoaDTO.getEmail());
+        // E-mail da conta autenticada: aceitar o do corpo deixava qualquer um "reservar" o e-mail
+        // de outra pessoa (índice único) e impedir que ela criasse o perfil.
+        User conta = userRepository.findById(userId).orElse(null);
+        if (conta == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Conta não encontrada"));
+        }
+        pessoa.setEmail(conta.getEmail());
         pessoa.setGenero(pessoaDTO.getGenero());
         pessoa.setInteresse(pessoaDTO.getInteresse());
         pessoa.setDescricao(pessoaDTO.getDescricao());
@@ -120,6 +129,12 @@ public class PessoaController {
             Pessoa criada = pessoaService.create(pessoa);
             log.info("[AUDIT] Perfil criado com sucesso - userId={}", userId);
             return ResponseEntity.ok(criada);
+        } catch (org.springframework.dao.DataAccessException e) {
+            // Erro de banco: não devolve a mensagem interna (nomes de índice, coleção etc.)
+            log.error("[AUDIT] Erro de banco no perfil - userId={}: {}", userId, e.getClass().getSimpleName());
+            return ResponseEntity
+                    .status(HttpStatus.CONFLICT)
+                    .body(Map.of("error", "Não foi possível salvar o perfil. Verifique os dados."));
         } catch (RuntimeException e) {
             log.error("[AUDIT] Erro ao criar perfil - userId={}, erro={}", userId, e.getMessage());
             return ResponseEntity
@@ -182,6 +197,12 @@ public class PessoaController {
             Pessoa atualizada = pessoaService.update(existing);
             log.info("[AUDIT] Perfil atualizado - userId={}", userId);
             return ResponseEntity.ok(atualizada);
+        } catch (org.springframework.dao.DataAccessException e) {
+            // Erro de banco: não devolve a mensagem interna (nomes de índice, coleção etc.)
+            log.error("[AUDIT] Erro de banco no perfil - userId={}: {}", userId, e.getClass().getSimpleName());
+            return ResponseEntity
+                    .status(HttpStatus.CONFLICT)
+                    .body(Map.of("error", "Não foi possível salvar o perfil. Verifique os dados."));
         } catch (RuntimeException e) {
             return ResponseEntity
                     .status(HttpStatus.BAD_REQUEST)
@@ -208,6 +229,12 @@ public class PessoaController {
             Pessoa atualizada = pessoaService.marcarCienciaResponsabilidade(pessoa.getId());
             log.info("[AUDIT] Ciência de responsabilidade marcada - userId={}", userId);
             return ResponseEntity.ok(atualizada);
+        } catch (org.springframework.dao.DataAccessException e) {
+            // Erro de banco: não devolve a mensagem interna (nomes de índice, coleção etc.)
+            log.error("[AUDIT] Erro de banco no perfil - userId={}: {}", userId, e.getClass().getSimpleName());
+            return ResponseEntity
+                    .status(HttpStatus.CONFLICT)
+                    .body(Map.of("error", "Não foi possível salvar o perfil. Verifique os dados."));
         } catch (RuntimeException e) {
             return ResponseEntity
                     .status(HttpStatus.BAD_REQUEST)

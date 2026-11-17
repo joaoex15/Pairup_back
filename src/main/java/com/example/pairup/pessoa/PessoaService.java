@@ -89,9 +89,10 @@ public class PessoaService {
     @Transactional
     public Pessoa create(Pessoa pessoa) {
         if (!pessoa.isMaiorDeIdade()) {
-            log.warn("Tentativa de criar usuário menor de idade: {}", pessoa.getEmail());
+            log.warn("Tentativa de criar perfil de menor de idade - usuarioId={}", pessoa.getUsuarioId());
             throw new RuntimeException("A pessoa deve ter pelo menos 18 anos");
         }
+        validarDataNascPlausivel(pessoa.getDataNasc());
 
         if (pessoaRepository.existsByEmail(pessoa.getEmail())) {
             throw new RuntimeException("Email já cadastrado");
@@ -119,6 +120,7 @@ public class PessoaService {
                 if (!pessoa.isMaiorDeIdade()) {
                     throw new RuntimeException("A pessoa deve ter pelo menos 18 anos");
                 }
+                validarDataNascPlausivel(pessoa.getDataNasc());
             }
 
             BeanUtils.copyProperties(pessoa, existing, "id", "usuarioId", "cienciaResponsabilidade");
@@ -126,6 +128,12 @@ public class PessoaService {
             return pessoaRepository.save(existing);
         }
         return null;
+    }
+
+    private static void validarDataNascPlausivel(LocalDate dataNasc) {
+        if (dataNasc != null && dataNasc.isBefore(LocalDate.now().minusYears(100))) {
+            throw new RuntimeException("Data de nascimento inválida");
+        }
     }
 
     @Transactional
